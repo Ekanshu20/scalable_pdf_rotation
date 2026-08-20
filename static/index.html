@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI PDF Rotator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="light-theme">
+    <div class="background-elements">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <header>
+        <div class="logo">
+            <span class="icon">📄</span>
+            <h1>AI PDF Rotator</h1>
+        </div>
+        <button id="theme-toggle" class="theme-toggle">🌙</button>
+    </header>
+
+    <main class="glass-panel">
+        <div class="tabs">
+            <button class="tab active" data-tab="upload-panel">Process PDFs</button>
+            <button class="tab" data-tab="history-panel">Recent Jobs</button>
+        </div>
+
+        <div id="upload-panel" class="tab-content active">
+            <h2>Auto-Rotate PDFs with AI</h2>
+            <p class="subtitle">Upload a single PDF, multiple PDFs, or an entire folder.</p>
+            
+            <div class="gpu-toggle-container">
+                <label class="switch-label" for="gpu-toggle">Use GPU Acceleration</label>
+                <label class="switch">
+                    <input type="checkbox" id="gpu-toggle" checked>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-content">
+                    <span class="upload-icon">📁</span>
+                    <p>Drag & Drop your PDFs or Folders here</p>
+                    <span class="or">or</span>
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="document.getElementById('file-input').click()">Browse Files</button>
+                        <button class="btn-secondary" onclick="document.getElementById('folder-input').click()">Browse Folder</button>
+                    </div>
+                    <input type="file" id="file-input" accept=".pdf" multiple hidden>
+                    <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+                </div>
+            </div>
+
+            <div id="selected-state" class="hidden selected-state">
+                <span class="upload-icon">📄</span>
+                <h3 id="selected-count">0 PDFs Selected</h3>
+                <p>Ready to process your documents.</p>
+                <div class="button-group" style="justify-content: center; margin-top: 1.5rem;">
+                    <button class="btn-primary" id="start-btn">Start Processing</button>
+                    <button class="btn-secondary" onclick="resetUI()">Cancel</button>
+                </div>
+            </div>
+
+            <div id="loading-state" class="hidden loading-state">
+                <div class="spinner"></div>
+                <h3 id="loading-title">Uploading...</h3>
+                <p id="loading-message">Transferring files to the server.</p>
+                <div class="progress-bar-container hidden" id="progress-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+                <p id="eta-message" class="hidden subtitle" style="margin-top: 10px; font-weight: 600; color: var(--primary);"></p>
+            </div>
+
+            <div id="success-state" class="hidden success-state">
+                <span class="success-icon">✅</span>
+                <h3>Processing Complete!</h3>
+                <p id="success-message">Your PDFs have been successfully rotated.</p>
+                <div id="preview-container" class="preview-container hidden">
+                    <p class="subtitle" style="margin-bottom: 0.5rem">First Page Preview</p>
+                    <img id="preview-img" src="" alt="First page preview" />
+                </div>
+                <a id="download-btn" class="btn-success" href="#">Download Results</a>
+                <button class="btn-secondary" onclick="resetUI()">Process More Files</button>
+            </div>
+            
+            <div id="error-state" class="hidden success-state">
+                <span class="success-icon" style="color: #ef4444;">❌</span>
+                <h3>Processing Failed</h3>
+                <p id="error-message"></p>
+                <button class="btn-secondary" onclick="resetUI()">Try Again</button>
+            </div>
+        </div>
+
+        <div id="history-panel" class="tab-content">
+            <h2>Recent Jobs</h2>
+            <p class="subtitle">History of recently processed PDFs.</p>
+            <div id="history-list" class="history-list">
+                <!-- History items injected here -->
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

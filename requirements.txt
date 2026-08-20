@@ -1,0 +1,13 @@
+PyMuPDF>=1.23.0
+opencv-python>=4.8.0
+numpy>=1.22.0
+paddleocr==2.6.1
+paddlepaddle-gpu>=2.5.0
+fastapi
+uvicorn
+python-multipart
+websockets
+sqlalchemy
+slowapi
+celery[redis]
+redis

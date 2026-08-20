@@ -1,0 +1,58 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      # Shared volume so the API can pass uploaded files to the worker
+      - shared_tmp:/app/tmp
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      # Shared volume so the worker can access files uploaded to the API
+      - shared_tmp:/app/tmp
+      # Persist PaddleOCR models
+      - ./paddleocr_models:/root/.paddleocr
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: celery -A worker.app beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - shared_tmp:/app/tmp
+
+volumes:
+  shared_tmp:
