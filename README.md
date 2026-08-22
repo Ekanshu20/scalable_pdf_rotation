@@ -10,6 +10,10 @@ It is built for **scale** and **performance**, utilizing a modern microservice a
 
 ## ✨ Features
 
+- **User Authentication**: Secure user registration and JWT-based login system to manage personal workspaces.
+- **Folder Management**: Organize your processed PDFs into custom folders for better file management.
+- **Visual Comparison & Manual Override**: Side-by-side before and after comparison of processed pages, with the ability to manually override and fix rotation predictions.
+- **Batch Processing**: Upload multiple PDFs at once and download the processed results as a convenient ZIP file.
 - **Modern Web UI**: Beautiful dark/light mode interface with drag-and-drop support.
 - **Real-Time Progress**: Watch the progress bar fill up smoothly thanks to WebSocket integration with Redis Pub/Sub.
 - **ETA Predictor**: Instantly calculates and displays an estimated time remaining based on the total number of pages and your hardware.
@@ -60,7 +64,7 @@ The easiest way to run this entire system is using **Docker**. Docker automatica
 
 ## 🛠️ Project Structure
 
-* **`main.py`**: The FastAPI application. Provides the UI and endpoints (`/api/v1/upload`, `/api/v1/history`, `/ws/progress`).
+* **`main.py`**: The fully-featured FastAPI application. Provides the UI, authentication (`/api/v1/auth/*`), folder management (`/api/v1/folders`), core endpoints (`/api/v1/upload`, `/api/v1/history`, `/api/v1/compare`, `/api/v1/override`), and WebSocket progress streaming (`/ws/progress`).
 * **`worker.py`**: The Celery worker configuration. Contains the background ML execution task and the cleanup task.
 * **`scalable_pdf_rotation.py`**: The core ML logic that analyzes bounding boxes and text orientation using PaddleOCR.
 * **`database.py`**: SQLAlchemy configuration for the SQLite job history tracking.
