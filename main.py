@@ -73,7 +73,8 @@ async def start_rotation(
 async def handle_upload(
     request: Request,
     files: List[UploadFile] = File(...),
-    use_gpu: bool = Form(True)
+    use_gpu: bool = Form(True),
+    num_workers: int = Form(2)
 ):
     """
     Handles multi-file and directory uploads from the web UI.
@@ -115,7 +116,7 @@ async def handle_upload(
         output_folder,
         use_gpu,
         gpu_mem=1500,
-        num_workers=1
+        num_workers=num_workers
     )
     
     # Record job in database

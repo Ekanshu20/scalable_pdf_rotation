@@ -104,54 +104,45 @@ def analyze_page_rotation(pdf_path, page_num):
         matrix = fitz.Matrix(100 / 72.0, 100 / 72.0)
         pix = page.get_pixmap(matrix=matrix, alpha=False)
         img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
-        img_bgr = img_array[:, :, ::-1]
+        img_bgr_0 = img_array[:, :, ::-1]
         
-        # 2. Get Bounding Boxes using the internal text_detector
-        dt_boxes, _ = _ocr_model.text_detector(img_bgr)
+        # Create full page rotations
+        img_bgr_90 = cv2.rotate(img_bgr_0, cv2.ROTATE_90_CLOCKWISE)
+        img_bgr_180 = cv2.rotate(img_bgr_0, cv2.ROTATE_180)
+        img_bgr_270 = cv2.rotate(img_bgr_0, cv2.ROTATE_90_COUNTERCLOCKWISE)
         
-        if dt_boxes is None or len(dt_boxes) == 0:
-            return page_num, 0, "no_text_found"
+        imgs = {0: img_bgr_0, 90: img_bgr_90, 180: img_bgr_180, 270: img_bgr_270}
+        confs = {}
+        
+        # Run full OCR on each rotated page. 
+        # This completely fixes the issue where text_detector draws bad horizontal boxes on sideways tables.
+        for angle, img in imgs.items():
+            result = _ocr_model.ocr(img, cls=False)
+            if not result or not result[0]:
+                confs[angle] = 0.0
+                continue
+                
+            # Sum up the confidence scores of ALL detected text lines to find the orientation with the most readable text
+            conf = sum([line[1][1] for line in result[0] if line[1]])
+            confs[angle] = conf
             
-        # To save huge amounts of time, we only run the heavy ML on the top 15 largest text boxes
-        box_sizes = [np.linalg.norm(b[0]-b[1]) * np.linalg.norm(b[1]-b[2]) for b in dt_boxes]
-        top_indices = np.argsort(box_sizes)[-15:]
-        sample_boxes = [dt_boxes[i] for i in top_indices]
-        
-        # Crop the image patches WITHOUT auto-rotating vertical text!
-        img_crop_list_0 = [get_straight_crop_image(img_bgr, np.array(box, dtype=np.float32)) for box in sample_boxes]
-        
-        # Generate the other 3 rotations
-        img_crop_list_90 = [cv2.rotate(crop, cv2.ROTATE_90_CLOCKWISE) for crop in img_crop_list_0]
-        img_crop_list_180 = [cv2.rotate(crop, cv2.ROTATE_180) for crop in img_crop_list_0]
-        img_crop_list_270 = [cv2.rotate(crop, cv2.ROTATE_90_COUNTERCLOCKWISE) for crop in img_crop_list_0]
-        
-        # Run text_recognizer on all sets
-        rec_res_0, _ = _ocr_model.text_recognizer(img_crop_list_0)
-        rec_res_90, _ = _ocr_model.text_recognizer(img_crop_list_90)
-        rec_res_180, _ = _ocr_model.text_recognizer(img_crop_list_180)
-        rec_res_270, _ = _ocr_model.text_recognizer(img_crop_list_270)
-        
-        # Sum up the confidence scores
-        conf_0 = sum([res[1] for res in rec_res_0 if res])
-        conf_90 = sum([res[1] for res in rec_res_90 if res])
-        conf_180 = sum([res[1] for res in rec_res_180 if res])
-        conf_270 = sum([res[1] for res in rec_res_270 if res])
-        
-        # Find the rotation that gives the maximum confidence
-        confs = {
-            0: conf_0,
-            90: conf_90, # If rotating 90 makes it readable, it means original is rotated 270 (or -90)
-            180: conf_180,
-            270: conf_270
-        }
-        
         best_rot = max(confs, key=confs.get)
+        max_score = confs[best_rot]
         
-        # If best_rot is the angle we had to ROTATE it by to make it readable, 
-        # then the page's current detected orientation is (360 - best_rot) % 360.
-        detected_angle = (360 - best_rot) % 360
+        # SAFETY CHECK 1: If the highest score is very low, the model is guessing blindly
+        # SAFETY CHECK 2: If the best rotation is 180, but 0 degrees is very close, bias to 0.
+        if max_score < 10.0:
+            print(f"--> Page {page_num} scores too low (max {max_score:.1f}). Defaulting to 0 deg.", flush=True)
+            detected_angle = 0
+        elif best_rot == 180 and (confs[180] - confs[0]) < 5.0:
+            print(f"--> Page {page_num} 180 deg ({confs[180]:.1f}) is too close to 0 deg ({confs[0]:.1f}). Defaulting to 0 deg.", flush=True)
+            detected_angle = 0
+        else:
+            # If best_rot is the angle we had to ROTATE it by to make it readable, 
+            # then the page's current detected orientation is (360 - best_rot) % 360.
+            detected_angle = (360 - best_rot) % 360
         
-        print(f"--> Page {page_num} confs: 0={conf_0:.1f}, 90={conf_90:.1f}, 180={conf_180:.1f}, 270={conf_270:.1f} -> {detected_angle} deg", flush=True)
+        print(f"--> Page {page_num} confs: 0={confs[0]:.1f}, 90={confs[90]:.1f}, 180={confs[180]:.1f}, 270={confs[270]:.1f} -> {detected_angle} deg", flush=True)
         
         return page_num, detected_angle, "universal_recognizer"
             
