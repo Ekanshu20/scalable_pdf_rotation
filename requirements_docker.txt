@@ -13,3 +13,10 @@ paddleocr==2.7.3
 pymupdf==1.24.2
 opencv-python-headless==4.6.0.66
 numpy<2.0.0
+passlib
+bcrypt==3.2.2
+python-jose[cryptography]
+python-multipart
+sqlalchemy
+slowapi
+websockets

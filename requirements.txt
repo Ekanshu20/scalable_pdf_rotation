@@ -11,3 +11,10 @@ sqlalchemy
 slowapi
 celery[redis]
 redis
+passlib
+bcrypt==3.2.2
+python-jose[cryptography]
+python-multipart
+sqlalchemy
+slowapi
+websockets

@@ -17,6 +17,8 @@ services:
     volumes:
       # Shared volume so the API can pass uploaded files to the worker
       - shared_tmp:/app/tmp
+      # Mount codebase for automatic hot-reloading
+      - .:/app
 
   worker:
     build:

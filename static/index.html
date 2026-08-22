@@ -1,107 +1,318 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI PDF Rotator</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <title>RotatePDF - Rotate PDF Documents</title>
+    <meta name="description"
+        content="Easily rotate single or multiple PDF pages for proper orientation. Drag and drop PDF files to get started.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <!-- PDF.js for client-side page counting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
 </head>
-<body class="light-theme">
-    <div class="background-elements">
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
-    </div>
 
-    <header>
-        <div class="logo">
-            <span class="icon">📄</span>
-            <h1>AI PDF Rotator</h1>
+<body>
+    <!-- Top Navigation Bar -->
+    <header class="top-navbar" id="top-navbar">
+        <div class="navbar-left">
+            <div class="navbar-brand">
+                <div class="brand-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <rect x="3" y="3" width="18" height="18" rx="4" fill="#2563EB" />
+                        <path d="M8 7h8v2H8V7zm0 4h8v2H8v-2zm0 4h5v2H8v-2z" fill="white" />
+                        <path d="M16 13l2 2-2 2" stroke="white" stroke-width="1.5" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                    </svg>
+                </div>
+                <span class="brand-name">RotatePDF</span>
+            </div>
+            <nav class="navbar-tabs">
+                <a class="nav-tab active" data-tab="files" id="tab-files">Files</a>
+                <a class="nav-tab" data-tab="history" id="tab-history">History</a>
+            </nav>
         </div>
-        <button id="theme-toggle" class="theme-toggle">🌙</button>
+        <div class="navbar-right">
+            <button class="notification-btn" id="notification-btn" aria-label="Notifications">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+                <span class="notification-dot"></span>
+            </button>
+            <div class="user-profile-area" id="user-profile-area">
+                <div class="user-avatar" id="user-avatar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                    </svg>
+                </div>
+                <span class="user-name" id="user-email">Loading...</span>
+                <svg class="dropdown-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
+                    <polyline points="6 9 12 15 18 9" />
+                </svg>
+                <!-- Dropdown -->
+                <div class="user-dropdown hidden" id="user-dropdown">
+                    <a class="dropdown-item logout-item" id="logout-btn-top">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                            <polyline points="16 17 21 12 16 7" />
+                            <line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                        Log out
+                    </a>
+                </div>
+            </div>
+        </div>
     </header>
 
-    <main class="glass-panel">
-        <div class="tabs">
-            <button class="tab active" data-tab="upload-panel">Process PDFs</button>
-            <button class="tab" data-tab="history-panel">Recent Jobs</button>
-        </div>
-
-        <div id="upload-panel" class="tab-content active">
-            <h2>Auto-Rotate PDFs with AI</h2>
-            <p class="subtitle">Upload a single PDF, multiple PDFs, or an entire folder.</p>
-            
-            <div class="gpu-toggle-container">
-                <label class="switch-label" for="gpu-toggle">Use GPU Acceleration</label>
-                <label class="switch">
-                    <input type="checkbox" id="gpu-toggle" checked>
-                    <span class="slider round"></span>
-                </label>
+    <div class="layout">
+        <!-- Left Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-section">
+                <a class="sidebar-item active" id="sidebar-dashboard" data-view="dashboard">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                        <polyline points="9 22 9 12 15 12 15 22" />
+                    </svg>
+                    Dashboard
+                </a>
             </div>
 
-            <div id="drop-zone" class="drop-zone">
-                <div class="drop-content">
-                    <span class="upload-icon">📁</span>
-                    <p>Drag & Drop your PDFs or Folders here</p>
-                    <span class="or">or</span>
-                    <div class="button-group">
-                        <button class="btn-primary" onclick="document.getElementById('file-input').click()">Browse Files</button>
-                        <button class="btn-secondary" onclick="document.getElementById('folder-input').click()">Browse Folder</button>
+            <div class="sidebar-section">
+                <h4 class="sidebar-label">Recently Uploaded</h4>
+                <div id="recent-files-list" class="recent-files-list">
+                    <!-- Dynamically populated -->
+                    <div class="recent-file-placeholder">
+                        <div class="file-icon-small">
+                            <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+                                <rect x="0.5" y="0.5" width="23" height="27" rx="3" fill="#F0F4FF" stroke="#CBD5E1" />
+                                <rect x="5" y="6" width="10" height="1.5" rx="0.75" fill="#93A3B8" />
+                                <rect x="5" y="10" width="14" height="1.5" rx="0.75" fill="#93A3B8" />
+                                <rect x="5" y="14" width="12" height="1.5" rx="0.75" fill="#93A3B8" />
+                                <rect x="5" y="18" width="8" height="1.5" rx="0.75" fill="#93A3B8" />
+                            </svg>
+                        </div>
+                        <div class="file-info">
+                            <span class="file-name">No files yet</span>
+                            <span class="file-status">Upload a PDF to get started</span>
+                        </div>
                     </div>
-                    <input type="file" id="file-input" accept=".pdf" multiple hidden>
-                    <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
                 </div>
             </div>
 
-            <div id="selected-state" class="hidden selected-state">
-                <span class="upload-icon">📄</span>
-                <h3 id="selected-count">0 PDFs Selected</h3>
-                <p>Ready to process your documents.</p>
-                <div class="button-group" style="justify-content: center; margin-top: 1.5rem;">
-                    <button class="btn-primary" id="start-btn">Start Processing</button>
-                    <button class="btn-secondary" onclick="resetUI()">Cancel</button>
+            <div class="sidebar-section">
+                <div class="sidebar-label-row">
+                    <h4 class="sidebar-label">Folders</h4>
+                    <button class="sidebar-toggle" id="folders-toggle" aria-label="Toggle folders">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                    </button>
                 </div>
-            </div>
-
-            <div id="loading-state" class="hidden loading-state">
-                <div class="spinner"></div>
-                <h3 id="loading-title">Uploading...</h3>
-                <p id="loading-message">Transferring files to the server.</p>
-                <div class="progress-bar-container hidden" id="progress-container">
-                    <div class="progress-bar" id="progress-bar"></div>
+                <div id="sidebar-folders-list" class="sidebar-folders-list">
+                    <!-- Dynamically populated -->
                 </div>
-                <p id="eta-message" class="hidden subtitle" style="margin-top: 10px; font-weight: 600; color: var(--primary);"></p>
+                <button class="add-folder-btn" id="add-folder-btn" title="Create new folder">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    New Folder
+                </button>
             </div>
+        </aside>
 
-            <div id="success-state" class="hidden success-state">
-                <span class="success-icon">✅</span>
-                <h3>Processing Complete!</h3>
-                <p id="success-message">Your PDFs have been successfully rotated.</p>
-                <div id="preview-container" class="preview-container hidden">
-                    <p class="subtitle" style="margin-bottom: 0.5rem">First Page Preview</p>
-                    <img id="preview-img" src="" alt="First page preview" />
+        <!-- Main Content -->
+        <main class="main-content" id="main-content">
+            <!-- Files / Dashboard View -->
+            <div id="view-dashboard" class="view-section active">
+                <div class="content-header">
+                    <h1>Rotate PDF Documents</h1>
+                    <p class="content-subtitle">Easily rotate single or multiple PDF pages for proper orientation.</p>
                 </div>
-                <a id="download-btn" class="btn-success" href="#">Download Results</a>
-                <button class="btn-secondary" onclick="resetUI()">Process More Files</button>
-            </div>
-            
-            <div id="error-state" class="hidden success-state">
-                <span class="success-icon" style="color: #ef4444;">❌</span>
-                <h3>Processing Failed</h3>
-                <p id="error-message"></p>
-                <button class="btn-secondary" onclick="resetUI()">Try Again</button>
-            </div>
-        </div>
 
-        <div id="history-panel" class="tab-content">
-            <h2>Recent Jobs</h2>
-            <p class="subtitle">History of recently processed PDFs.</p>
-            <div id="history-list" class="history-list">
-                <!-- History items injected here -->
-            </div>
-        </div>
-    </main>
+                <div class="upload-card" id="upload-card">
+                    <!-- Drop Zone -->
+                    <div id="drop-zone" class="drop-zone">
+                        <div class="drop-zone-icons">
+                            <div class="pdf-icon-large">
+                                <svg width="48" height="56" viewBox="0 0 48 56" fill="none">
+                                    <rect x="1" y="1" width="46" height="54" rx="5" fill="#F8FAFC" stroke="#CBD5E1"
+                                        stroke-width="2" />
+                                    <rect x="8" y="12" width="20" height="3" rx="1.5" fill="#94A3B8" />
+                                    <rect x="8" y="20" width="32" height="3" rx="1.5" fill="#94A3B8" />
+                                    <rect x="8" y="28" width="28" height="3" rx="1.5" fill="#94A3B8" />
+                                    <rect x="8" y="36" width="16" height="3" rx="1.5" fill="#94A3B8" />
+                                    <rect x="14" y="42" width="20" height="8" rx="2" fill="#2563EB" />
+                                    <text x="24" y="48.5" text-anchor="middle" fill="white" font-size="6"
+                                        font-weight="600" font-family="Inter">PDF</text>
+                                </svg>
+                            </div>
+                            <span class="plus-sign">+</span>
+                            <div class="upload-icon-circle">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#64748B"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="17 8 12 3 7 8" />
+                                    <line x1="12" y1="3" x2="12" y2="15" />
+                                </svg>
+                            </div>
+                        </div>
+                        <p class="drop-zone-title">Drag & drop PDF files here, or click to upload.</p>
+                        <p class="drop-zone-subtitle">Max 200MB.</p>
+                        <label class="btn-primary upload-btn" id="upload-label">
+                            Upload PDF File(s)
+                            <input type="file" id="file-input" multiple accept=".pdf" style="display:none;">
+                        </label>
+                        <div class="feature-tags">
+                            <span class="feature-tag">Bulk Processing (clockwise)</span>
+                            <span class="tag-separator">·</span>
+                            <span class="feature-tag">All Pages</span>
+                            <span class="tag-separator">·</span>
+                            <span class="feature-tag">Free up to 10 Files</span>
+                        </div>
+                    </div>
+
+                    <!-- Folder select (hidden inside drop zone area) -->
+                    <div class="folder-select-area" id="folder-select-area">
+                        <label>Save to Folder (Optional): </label>
+                        <select id="folder-select" class="folder-dropdown">
+                            <option value="">-- None --</option>
+                        </select>
+                    </div>
+
+                    <!-- Selected State (File List) -->
+                    <div id="selected-state" class="hidden state-panel file-list-panel">
+                        <div class="file-list-header">
+                            <h3>Ready to Process</h3>
+                            <span id="selected-summary" class="summary-badge">0 files • 0 pages</span>
+                        </div>
+                        
+                        <div class="file-table-container">
+                            <table class="file-list-table">
+                                <thead>
+                                    <tr>
+                                        <th>File</th>
+                                        <th>Size</th>
+                                        <th>Pages</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="file-list-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="gpu-toggle-area">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="gpu-toggle" checked>
+                                <span class="toggle-text">Use GPU Acceleration</span>
+                            </label>
+                        </div>
+                        <div class="state-actions">
+                            <button class="btn-primary" id="start-btn">Start Processing</button>
+                            <button class="btn-secondary" onclick="resetUI()">Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div id="loading-state" class="hidden state-panel">
+                        <div class="spinner"></div>
+                        <h3 id="loading-title">Processing...</h3>
+                        <p id="loading-message">Waiting for worker...</p>
+                        
+                        <div id="per-file-progress" class="per-file-progress-container">
+                            <!-- Populated by JS -->
+                        </div>
+                        
+                        <p id="eta-message" class="hidden eta-text"></p>
+                        <div id="progress-container" class="progress-container hidden">
+                            <div id="progress-bar" class="progress-bar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Success State -->
+                    <div id="success-state" class="hidden state-panel">
+                        <div class="success-header-row">
+                            <div class="success-icon-small">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10B981"
+                                    stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                    <polyline points="22 4 12 14.01 9 11.01" />
+                                </svg>
+                            </div>
+                            <div class="success-titles">
+                                <h3 class="success-title">Processing Complete!</h3>
+                                <p>Review the AI corrections below.</p>
+                            </div>
+                            <div class="success-main-actions">
+                                <a id="download-btn" class="btn-primary" style="text-decoration: none;">Download All</a>
+                                <button class="btn-secondary" onclick="resetUI()">Process More</button>
+                            </div>
+                        </div>
+
+                        <div id="preview-container" class="preview-area">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Error State -->
+                    <div id="error-state" class="hidden state-panel">
+                        <div class="error-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#EF4444"
+                                stroke-width="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="15" y1="9" x2="9" y2="15" />
+                                <line x1="9" y1="9" x2="15" y2="15" />
+                            </svg>
+                        </div>
+                        <h3 class="error-title">Error</h3>
+                        <p id="error-message">Something went wrong.</p>
+                        <button class="btn-secondary" onclick="resetUI()">Try Again</button>
+                    </div>
+                </div>
+
+                <!-- History View -->
+                <div id="view-history" class="view-section hidden">
+                    <div class="content-header">
+                        <h1>Recent Activity</h1>
+                        <p class="content-subtitle">View and download your previously processed PDFs.</p>
+                    </div>
+                    <div class="history-card">
+                        <div id="history-list" class="list-container">
+                            <!-- History injected via JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Folders View -->
+                <div id="view-folders" class="view-section hidden">
+                    <div class="content-header">
+                        <h1>Your Folders</h1>
+                        <p class="content-subtitle">Organize your rotated PDFs into folders.</p>
+                    </div>
+                    <div class="folders-header-card">
+                        <button class="btn-primary" onclick="createFolder()">+ New Folder</button>
+                    </div>
+                    <div id="folders-list" class="grid-list">
+                        <!-- Folders injected via JS -->
+                    </div>
+                </div>
+        </main>
+    </div>
 
     <script src="/static/script.js"></script>
 </body>
+
 </html>

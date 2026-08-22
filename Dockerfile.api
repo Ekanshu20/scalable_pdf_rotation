@@ -16,7 +16,7 @@ RUN python -m pip install --upgrade pip
 
 # Install API requirements only (ignoring paddle and opencv to keep image light)
 # We can install just fastapi, uvicorn, celery, redis, pydantic
-RUN pip install fastapi==0.111.0 uvicorn==0.30.1 pydantic==2.7.1 celery==5.4.0 redis==5.0.4 python-multipart websockets sqlalchemy slowapi PyMuPDF>=1.23.0
+RUN pip install fastapi==0.111.0 uvicorn==0.30.1 pydantic==2.7.1 celery==5.4.0 redis==5.0.4 python-multipart websockets sqlalchemy slowapi PyMuPDF>=1.23.0 passlib bcrypt==3.2.2 python-jose[cryptography]
 
 # Copy application files
 COPY main.py .
@@ -28,5 +28,5 @@ COPY static static
 # Expose API port
 EXPOSE 8000
 
-# Run API server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run API server with hot-reload enabled
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

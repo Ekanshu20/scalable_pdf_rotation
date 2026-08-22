@@ -178,10 +178,17 @@ def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=150
         
     overall_start_time = time.time()
     total_pages_processed = 0
+    all_page_rotations = {}
+    files_status = {os.path.basename(f): "queued" for f in pdf_files}
     
     logger.info("Phase 1: Detecting visual orientations in parallel...")
     with ProcessPoolExecutor(max_workers=num_workers, initializer=init_worker, initargs=(use_gpu, gpu_mem)) as executor:
         for file_idx, input_pdf in enumerate(pdf_files):
+            filename = os.path.basename(input_pdf)
+            files_status[filename] = "processing"
+            if progress_callback:
+                progress_callback(file_idx, len(pdf_files), filename, files_status)
+                
             rel_path = os.path.relpath(input_pdf, input_folder)
             output_pdf = os.path.join(output_folder, rel_path)
             os.makedirs(os.path.dirname(output_pdf), exist_ok=True)
@@ -193,6 +200,9 @@ def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=150
                 doc.close()
             except Exception as e:
                 logger.error(f"Failed to open {input_pdf}: {e}")
+                files_status[filename] = "failed"
+                if progress_callback:
+                    progress_callback(file_idx + 1, len(pdf_files), filename, files_status)
                 continue
                 
             total_pages_processed += total_pages
@@ -209,11 +219,15 @@ def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=150
             logger.info(f"Applying corrections and saving to {output_pdf}...")
             doc = fitz.open(input_pdf)
             summary = Counter()
+            all_page_rotations[filename] = {}
             
             for page_num in range(total_pages):
                 page = doc.load_page(page_num)
                 detected_angle, method = page_rotations.get(page_num, (0, "default"))
                 summary[f"{detected_angle}_degrees_via_{method}"] += 1
+                
+                # Record what the AI decided
+                all_page_rotations[filename][page_num] = detected_angle
                 
                 if detected_angle != 0:
                     current_metadata_rot = page.rotation
@@ -229,8 +243,9 @@ def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=150
             for k, v in summary.items():
                 logger.info(f"  {k}: {v} pages")
                 
+            files_status[filename] = "done"
             if progress_callback:
-                progress_callback(file_idx + 1, len(pdf_files), os.path.basename(input_pdf))
+                progress_callback(file_idx + 1, len(pdf_files), filename, files_status)
     
     overall_end_time = time.time()
     total_time = overall_end_time - overall_start_time
@@ -244,7 +259,8 @@ def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=150
         "status": "completed",
         "files_processed": len(pdf_files),
         "pages_processed": total_pages_processed,
-        "time_seconds": total_time
+        "time_seconds": total_time,
+        "page_rotations": all_page_rotations
     }
 
 def main():

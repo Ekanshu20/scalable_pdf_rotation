@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Scalable PDF Rotation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #F8FAFC;
+        }
+        .auth-card {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .auth-card h2 {
+            margin-bottom: 24px;
+            color: #1E293B;
+        }
+        .input-group {
+            margin-bottom: 16px;
+            text-align: left;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #64748B;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-group input:focus {
+            border-color: #2563EB;
+        }
+        .auth-btn {
+            width: 100%;
+            padding: 12px;
+            background-color: #2563EB;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .auth-btn:hover {
+            background-color: #1D4ED8;
+        }
+        .toggle-auth {
+            margin-top: 16px;
+            font-size: 14px;
+            color: #64748B;
+        }
+        .toggle-auth a {
+            color: #2563EB;
+            text-decoration: none;
+            font-weight: 500;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div class="auth-card" id="login-form">
+    <h2>Sign In</h2>
+    <div class="input-group">
+        <label>Email Address</label>
+        <input type="email" id="login-email" placeholder="you@company.com">
+    </div>
+    <div class="input-group">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="••••••••">
+    </div>
+    <button class="auth-btn" onclick="login()">Continue</button>
+    <div class="toggle-auth">
+        Don't have an account? <a onclick="toggleAuth()">Sign up</a>
+    </div>
+</div>
+
+<div class="auth-card" id="register-form" style="display: none;">
+    <h2>Create Account</h2>
+    <div class="input-group">
+        <label>Email Address</label>
+        <input type="email" id="reg-email" placeholder="you@company.com">
+    </div>
+    <div class="input-group">
+        <label>Password</label>
+        <input type="password" id="reg-password" placeholder="••••••••">
+    </div>
+    <button class="auth-btn" onclick="register()">Sign Up</button>
+    <div class="toggle-auth">
+        Already have an account? <a onclick="toggleAuth()">Sign in</a>
+    </div>
+</div>
+
+<script>
+    function toggleAuth() {
+        const loginForm = document.getElementById('login-form');
+        const regForm = document.getElementById('register-form');
+        if (loginForm.style.display === 'none') {
+            loginForm.style.display = 'block';
+            regForm.style.display = 'none';
+        } else {
+            loginForm.style.display = 'none';
+            regForm.style.display = 'block';
+        }
+    }
+
+    async function login() {
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        
+        const formData = new URLSearchParams();
+        formData.append('username', email);
+        formData.append('password', password);
+
+        const res = await fetch('/api/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem('access_token', data.access_token);
+            window.location.href = '/dashboard';
+        } else {
+            alert("Login failed. Check credentials.");
+        }
+    }
+
+    async function register() {
+        const email = document.getElementById('reg-email').value;
+        const password = document.getElementById('reg-password').value;
+        
+        const res = await fetch('/api/v1/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        
+        if (res.ok) {
+            alert("Registration successful! Please login.");
+            toggleAuth();
+        } else {
+            const data = await res.json();
+            alert("Registration failed: " + data.detail);
+        }
+    }
+</script>
+
+</body>
+</html>
