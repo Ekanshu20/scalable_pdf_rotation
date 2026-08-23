@@ -160,8 +160,233 @@ def get_folder_files(folder_id: int, current_user: User = Depends(get_current_us
     folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    files = db.query(FileRecord).filter(FileRecord.folder_id == folder_id).order_by(FileRecord.created_at.desc()).all()
+    
+    result = []
+    for f in files:
+        available = f.file_path and os.path.exists(f.file_path)
+        result.append({
+            "id": f.id,
+            "filename": f.filename,
+            "available": available,
+            "created_at": f.created_at.isoformat()
+        })
+    
+    # Also get jobs linked to this folder
+    jobs = db.query(Job).filter(Job.folder_id == folder_id, Job.user_id == current_user.id).order_by(Job.created_at.desc()).all()
+    job_list = []
+    for j in jobs:
+        job_list.append({
+            "task_id": j.task_id,
+            "status": j.status,
+            "total_files": j.total_files,
+            "total_pages": j.total_pages,
+            "created_at": j.created_at.isoformat(),
+            "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+        })
+    
+    return {"files": result, "jobs": job_list}
+
+@app.get("/api/v1/folders/files/{file_id}/download")
+def download_folder_file(file_id: int, token: str = None, db: Session = Depends(get_db)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    file_record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Verify the folder belongs to the user
+    folder = db.query(Folder).filter(Folder.id == file_record.folder_id, Folder.user_id == user.id).first()
+    if not folder:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if not file_record.file_path or not os.path.exists(file_record.file_path):
+        raise HTTPException(status_code=404, detail="File no longer available on disk (cleaned up after 24h)")
+    
+    return FileResponse(file_record.file_path, media_type="application/pdf", filename=file_record.filename)
+
+@app.delete("/api/v1/folders/{folder_id}")
+def delete_folder(folder_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    # Delete associated file records first
+    db.query(FileRecord).filter(FileRecord.folder_id == folder_id).delete()
+    db.delete(folder)
+    db.commit()
+    return {"message": "Folder deleted"}
+
+class RenameFolderRequest(BaseModel):
+    name: str
+
+class MoveJobRequest(BaseModel):
+    folder_id: Optional[int] = None
+
+@app.put("/api/v1/folders/{folder_id}")
+def rename_folder(folder_id: int, request: RenameFolderRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    folder.name = request.name
+    db.commit()
+    return {"message": "Folder renamed", "name": folder.name}
+
+@app.post("/api/v1/jobs/{task_id}/move")
+def move_job_to_folder(task_id: str, request: MoveJobRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.task_id == task_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if request.folder_id:
+        folder = db.query(Folder).filter(Folder.id == request.folder_id, Folder.user_id == current_user.id).first()
+        if not folder:
+            raise HTTPException(status_code=404, detail="Target folder not found")
+        job.folder_id = folder.id
+        task_result = AsyncResult(task_id, app=celery_app)
+        if task_result.status == 'SUCCESS' and task_result.result:
+            output_folder = task_result.result.get("output_folder")
+            if output_folder and os.path.exists(output_folder):
+                db.query(FileRecord).filter(FileRecord.file_path.startswith(output_folder)).delete()
+                for filename in os.listdir(output_folder):
+                    new_file = FileRecord(folder_id=folder.id, filename=filename, file_path=os.path.join(output_folder, filename))
+                    db.add(new_file)
+    else:
+        job.folder_id = None
+        task_result = AsyncResult(task_id, app=celery_app)
+        if task_result.status == 'SUCCESS' and task_result.result:
+            output_folder = task_result.result.get("output_folder")
+            if output_folder:
+                db.query(FileRecord).filter(FileRecord.file_path.startswith(output_folder)).delete()
+    db.commit()
+    return {"message": "Moved successfully"}
+
+@app.get("/api/v1/folders/{folder_id}/download_all")
+def download_folder_all(folder_id: int, token: str = None, db: Session = Depends(get_db)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user.id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    
     files = db.query(FileRecord).filter(FileRecord.folder_id == folder_id).all()
-    return [{"id": f.id, "filename": f.filename, "created_at": f.created_at.isoformat()} for f in files]
+    if not files:
+        raise HTTPException(status_code=404, detail="No files in folder")
+        
+    zip_filename = f"{folder.name}_all_files.zip".replace(' ', '_')
+    zip_filepath = os.path.join(BASE_TMP_DIR, zip_filename)
+    with zipfile.ZipFile(zip_filepath, 'w') as zipf:
+        for f in files:
+            if f.file_path and os.path.exists(f.file_path):
+                zipf.write(f.file_path, arcname=f.filename)
+    
+    return FileResponse(zip_filepath, media_type="application/zip", filename=zip_filename)
+
+@app.post("/api/v1/folders/{folder_id}/merge")
+def merge_folder_pdfs(folder_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    files = db.query(FileRecord).filter(FileRecord.folder_id == folder_id).order_by(FileRecord.created_at.asc()).all()
+    
+    valid_paths = [f.file_path for f in files if f.file_path and os.path.exists(f.file_path) and f.file_path.lower().endswith('.pdf')]
+    if len(valid_paths) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 valid PDFs to merge")
+        
+    merged_pdf = fitz.open()
+    for path in valid_paths:
+        try:
+            doc = fitz.open(path)
+            merged_pdf.insert_pdf(doc)
+            doc.close()
+        except Exception:
+            pass
+            
+    merged_filename = f"Merged_{folder.name}.pdf".replace(' ', '_')
+    merged_filepath = os.path.join(BASE_TMP_DIR, merged_filename)
+    merged_pdf.save(merged_filepath)
+    merged_pdf.close()
+    
+    new_file = FileRecord(folder_id=folder_id, filename=merged_filename, file_path=merged_filepath)
+    db.add(new_file)
+    db.commit()
+    
+    return {"message": "Merged successfully", "filename": merged_filename}
+
+@app.get("/api/v1/dashboard")
+def get_dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return aggregated stats for the dashboard view."""
+    total_jobs = db.query(Job).filter(Job.user_id == current_user.id).count()
+    successful_jobs = db.query(Job).filter(Job.user_id == current_user.id, Job.status == JobStatus.SUCCESS.value).count()
+    
+    from sqlalchemy import func
+    total_files_result = db.query(func.sum(Job.total_files)).filter(Job.user_id == current_user.id, Job.status == JobStatus.SUCCESS.value).scalar()
+    total_pages_result = db.query(func.sum(Job.total_pages)).filter(Job.user_id == current_user.id, Job.status == JobStatus.SUCCESS.value).scalar()
+    total_files = total_files_result or 0
+    total_pages = total_pages_result or 0
+    
+    folder_count = db.query(Folder).filter(Folder.user_id == current_user.id).count()
+    
+    # Count rotated vs unchanged pages from Celery results
+    pages_rotated = 0
+    pages_unchanged = 0
+    recent_jobs_db = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(50).all()
+    for job in recent_jobs_db:
+        if job.status == JobStatus.SUCCESS.value:
+            try:
+                task_result = AsyncResult(job.task_id, app=celery_app)
+                if task_result.status == 'SUCCESS' and task_result.result:
+                    page_rotations = task_result.result.get('page_rotations', {})
+                    for filename, rotations in page_rotations.items():
+                        for page_num, rot in rotations.items():
+                            if rot == 0:
+                                pages_unchanged += 1
+                            else:
+                                pages_rotated += 1
+            except Exception:
+                pass
+    
+    # Recent 5 jobs for the dashboard table
+    recent_jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(5).all()
+    recent = []
+    for j in recent_jobs:
+        recent.append({
+            "task_id": j.task_id,
+            "status": j.status,
+            "total_files": j.total_files,
+            "total_pages": j.total_pages,
+            "created_at": j.created_at.isoformat(),
+            "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+        })
+    
+    return {
+        "total_jobs": total_jobs,
+        "successful_jobs": successful_jobs,
+        "total_files": total_files,
+        "total_pages": total_pages,
+        "pages_rotated": pages_rotated,
+        "pages_unchanged": pages_unchanged,
+        "folder_count": folder_count,
+        "recent_jobs": recent,
+    }
 
 
 # --- CORE FUNCTIONALITY ---
@@ -276,7 +501,7 @@ async def handle_upload(
 
 @app.get("/api/v1/history")
 async def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(10).all()
+    jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(20).all()
     
     # Sync PROCESSING jobs with Celery state
     for job in jobs:
@@ -291,7 +516,46 @@ async def get_history(current_user: User = Depends(get_current_user), db: Sessio
                 job.completed_at = datetime.utcnow()
     db.commit()
     
-    return [{"task_id": j.task_id, "status": j.status, "total_files": j.total_files, "created_at": j.created_at.isoformat()} for j in jobs]
+    result = []
+    for j in jobs:
+        # Try to get rotation breakdown from Celery result
+        pages_rotated = 0
+        pages_unchanged = 0
+        if j.status == JobStatus.SUCCESS.value:
+            try:
+                task_result = AsyncResult(j.task_id, app=celery_app)
+                if task_result.status == 'SUCCESS' and task_result.result:
+                    page_rotations = task_result.result.get('page_rotations', {})
+                    for fname, rotations in page_rotations.items():
+                        for pnum, rot in rotations.items():
+                            if rot == 0:
+                                pages_unchanged += 1
+                            else:
+                                pages_rotated += 1
+            except Exception:
+                pass
+        
+        folder_name = None
+        if j.folder_id:
+            folder = db.query(Folder).filter(Folder.id == j.folder_id).first()
+            if folder:
+                folder_name = folder.name
+                
+        result.append({
+            "task_id": j.task_id,
+            "status": j.status,
+            "total_files": j.total_files,
+            "total_pages": j.total_pages,
+            "pages_rotated": pages_rotated,
+            "pages_unchanged": pages_unchanged,
+            "created_at": j.created_at.isoformat(),
+            "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            "error_message": j.error_message,
+            "folder_id": j.folder_id,
+            "folder_name": folder_name,
+        })
+    
+    return result
 
 @app.get("/api/v1/status/{task_id}")
 async def get_status(task_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

@@ -111,7 +111,8 @@
 
             <div class="sidebar-section">
                 <div class="sidebar-label-row">
-                    <h4 class="sidebar-label">Folders</h4>
+                    <h4 class="sidebar-label" id="sidebar-folders-label" style="cursor:pointer; color: var(--primary);">
+                        Folders</h4>
                     <button class="sidebar-toggle" id="folders-toggle" aria-label="Toggle folders">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
@@ -136,10 +137,74 @@
         <main class="main-content" id="main-content">
             <!-- Files / Dashboard View -->
             <div id="view-dashboard" class="view-section active">
+                <!-- Dashboard Stats -->
                 <div class="content-header">
-                    <h1>Rotate PDF Documents</h1>
-                    <p class="content-subtitle">Easily rotate single or multiple PDF pages for proper orientation.</p>
+                    <h1>Dashboard</h1>
+                    <p class="content-subtitle">Overview of your PDF rotation activity.</p>
                 </div>
+
+                <div class="stats-grid" id="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #EFF6FF; color: #2563EB;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-total-files">0</span>
+                            <span class="stat-label">PDFs Processed</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #F0FDF4; color: #16A34A;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 12h10"/><path d="M12 7v10"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-total-pages">0</span>
+                            <span class="stat-label">Total Pages</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #FFF7ED; color: #EA580C;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-pages-rotated">0</span>
+                            <span class="stat-label">Pages Rotated</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #F5F3FF; color: #7C3AED;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-folders">0</span>
+                            <span class="stat-label">Folders</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Jobs -->
+                <div class="recent-jobs-section">
+                    <h2 class="section-title">Recent Jobs</h2>
+                    <div class="recent-jobs-card">
+                        <table class="recent-jobs-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Files</th>
+                                    <th>Pages</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recent-jobs-body">
+                                <tr><td colspan="5" style="text-align:center; color: var(--text-light); padding: 20px;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Upload Section -->
+                <h2 class="section-title" style="margin-top: 28px;">Upload & Process</h2>
 
                 <div class="upload-card" id="upload-card">
                     <!-- Drop Zone -->
@@ -169,27 +234,14 @@
                             </div>
                         </div>
                         <p class="drop-zone-title">Drag & drop PDF files here, or click to upload.</p>
-                        <p class="drop-zone-subtitle">Max 200MB.</p>
+                        <p class="drop-zone-subtitle">Max 100MB.</p>
                         <label class="btn-primary upload-btn" id="upload-label">
                             Upload PDF File(s)
                             <input type="file" id="file-input" multiple accept=".pdf" style="display:none;">
                         </label>
-                        <div class="feature-tags">
-                            <span class="feature-tag">Bulk Processing (clockwise)</span>
-                            <span class="tag-separator">·</span>
-                            <span class="feature-tag">All Pages</span>
-                            <span class="tag-separator">·</span>
-                            <span class="feature-tag">Free up to 10 Files</span>
-                        </div>
                     </div>
 
-                    <!-- Folder select (hidden inside drop zone area) -->
-                    <div class="folder-select-area" id="folder-select-area">
-                        <label>Save to Folder (Optional): </label>
-                        <select id="folder-select" class="folder-dropdown">
-                            <option value="">-- None --</option>
-                        </select>
-                    </div>
+
 
                     <!-- Selected State (File List) -->
                     <div id="selected-state" class="hidden state-panel file-list-panel">
@@ -197,7 +249,7 @@
                             <h3>Ready to Process</h3>
                             <span id="selected-summary" class="summary-badge">0 files • 0 pages</span>
                         </div>
-                        
+
                         <div class="file-table-container">
                             <table class="file-list-table">
                                 <thead>
@@ -231,11 +283,11 @@
                         <div class="spinner"></div>
                         <h3 id="loading-title">Processing...</h3>
                         <p id="loading-message">Waiting for worker...</p>
-                        
+
                         <div id="per-file-progress" class="per-file-progress-container">
                             <!-- Populated by JS -->
                         </div>
-                        
+
                         <p id="eta-message" class="hidden eta-text"></p>
                         <div id="progress-container" class="progress-container hidden">
                             <div id="progress-bar" class="progress-bar"></div>
@@ -282,6 +334,7 @@
                         <button class="btn-secondary" onclick="resetUI()">Try Again</button>
                     </div>
                 </div>
+                </div>
 
                 <!-- History View -->
                 <div id="view-history" class="view-section hidden">
@@ -299,14 +352,46 @@
                 <!-- Folders View -->
                 <div id="view-folders" class="view-section hidden">
                     <div class="content-header">
-                        <h1>Your Folders</h1>
-                        <p class="content-subtitle">Organize your rotated PDFs into folders.</p>
+                        <h1 id="folders-view-title">Your Folders</h1>
+                        <p class="content-subtitle" id="folders-view-subtitle">Organize your rotated PDFs into folders.</p>
                     </div>
-                    <div class="folders-header-card">
+                    <div class="folders-header-card" id="folders-header-card">
                         <button class="btn-primary" onclick="createFolder()">+ New Folder</button>
                     </div>
                     <div id="folders-list" class="grid-list">
                         <!-- Folders injected via JS -->
+                    </div>
+                    <!-- Folder Detail (hidden by default) -->
+                    <div id="folder-detail-view" class="hidden">
+                        <div class="folder-detail-header" style="justify-content: space-between; display: flex; width: 100%;">
+                            <div style="display: flex; align-items: center; gap: 16px;">
+                                <button class="btn-secondary btn-back" id="folder-back-btn" onclick="showFoldersList()">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                                    Back to Folders
+                                </button>
+                                <h2 id="folder-detail-name" style="margin:0; display:flex; align-items:center; gap:8px;">
+                                    Folder Name
+                                    <button class="icon-btn" onclick="renameFolder()" title="Rename Folder" style="background:none; border:none; color:var(--text-light); cursor:pointer;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                    </button>
+                                </h2>
+                            </div>
+                            <div class="folder-actions" style="display:flex; gap:10px;">
+                                <button class="btn-secondary" onclick="downloadAllFromFolder()">⬇️ Download ZIP</button>
+                                <button class="btn-secondary" onclick="mergeFolderPdfs()">📄 Merge PDFs</button>
+                                <label class="btn-primary" style="cursor:pointer; display:flex; align-items:center;">
+                                    + Upload Here
+                                    <input type="file" id="folder-file-input" multiple accept=".pdf" style="display:none;" onchange="uploadToFolder(event)">
+                                </label>
+                            </div>
+                        </div>
+                        <div class="folder-tools" style="display:flex; justify-content:space-between; margin-bottom:16px;">
+                            <input type="text" id="folder-search-input" placeholder="Search files..." class="form-input" style="max-width:300px;" onkeyup="filterFolderFiles()">
+                            <button class="btn-secondary" id="grid-toggle-btn" onclick="toggleFolderGrid()">🔲 Grid View</button>
+                        </div>
+                        <div id="folder-files-list" class="folder-files-list">
+                            <!-- Files injected via JS -->
+                        </div>
                     </div>
                 </div>
         </main>

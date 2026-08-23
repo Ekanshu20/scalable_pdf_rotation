@@ -744,7 +744,7 @@ body {
 }
 
 .preview-image {
-    max-width: 200px;
+    max-width: 400px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
@@ -874,6 +874,381 @@ body {
 .folder-item p {
     font-size: 13px;
     color: var(--text-muted);
+}
+
+.folder-item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.folder-icon-lg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    background: var(--primary-light);
+    border-radius: var(--radius-md);
+}
+
+.folder-delete-btn {
+    background: none;
+    border: none;
+    color: var(--text-light);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all var(--transition);
+    opacity: 0;
+}
+
+.folder-item:hover .folder-delete-btn {
+    opacity: 1;
+}
+
+.folder-delete-btn:hover {
+    color: #DC2626;
+    background: #FEF2F2;
+}
+
+.folder-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-light);
+    margin-top: 8px;
+}
+
+/* ===== Folder Detail View ===== */
+.folder-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.folder-detail-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.btn-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    padding: 6px 12px;
+}
+
+.folder-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.folder-file-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: all var(--transition);
+}
+
+.folder-file-item:hover {
+    border-color: var(--primary-lighter);
+    box-shadow: var(--card-shadow);
+}
+
+.folder-file-icon {
+    flex-shrink: 0;
+}
+
+.folder-file-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.folder-file-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-main);
+}
+
+.folder-file-date {
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+.folder-file-actions {
+    margin-left: auto;
+}
+
+.folder-download-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.folder-file-expired {
+    font-size: 12px;
+    color: var(--text-light);
+    background: var(--border-light);
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.folder-section-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+}
+
+.folder-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    background: var(--card-bg);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+}
+
+.folder-job-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+    transition: all var(--transition);
+}
+
+.folder-job-item:hover {
+    border-color: var(--primary-lighter);
+    box-shadow: var(--card-shadow);
+}
+
+.folder-job-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.folder-job-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.folder-job-files {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.folder-job-date {
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+.folder-job-actions {
+    margin-left: auto;
+}
+
+/* ===== Dashboard Stats Grid ===== */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+.stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: var(--card-shadow);
+    transition: all var(--transition);
+}
+
+.stat-card:hover {
+    box-shadow: var(--card-shadow-hover);
+    transform: translateY(-1px);
+}
+
+.stat-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+}
+
+.stat-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.2;
+}
+
+.stat-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* ===== Section Titles ===== */
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 12px;
+}
+
+/* ===== Recent Jobs Table ===== */
+.recent-jobs-section {
+    margin-bottom: 8px;
+}
+
+.recent-jobs-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--card-shadow);
+    overflow: hidden;
+}
+
+.recent-jobs-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.recent-jobs-table th {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+    background: var(--border-light);
+}
+
+.recent-jobs-table td {
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.recent-jobs-table tr:last-child td {
+    border-bottom: none;
+}
+
+.recent-jobs-table tr:hover td {
+    background: var(--border-light);
+}
+
+/* ===== Enhanced History Items ===== */
+.history-item-left {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    flex: 1;
+}
+
+.history-icon {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary-light);
+    border-radius: var(--radius-md);
+}
+
+.history-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.history-top-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.history-files {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-main);
+}
+
+.history-status-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.history-date {
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+.history-item-right {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.history-rotation-breakdown {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.rotation-chip {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.rotation-chip.rotated {
+    background: #FFF7ED;
+    color: #EA580C;
+}
+
+.rotation-chip.unchanged {
+    background: #F0FDF4;
+    color: #16A34A;
 }
 
 /* ===== Folder Dropdown ===== */
@@ -1122,7 +1497,7 @@ body {
 
 .comparison-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(900px, 1fr));
     gap: 20px;
     padding: 20px;
     background: white;

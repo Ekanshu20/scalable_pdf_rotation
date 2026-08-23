@@ -122,20 +122,38 @@ def analyze_page_rotation(pdf_path, page_num):
                 confs[angle] = 0.0
                 continue
                 
-            # Sum up the confidence scores of ALL detected text lines to find the orientation with the most readable text
-            conf = sum([line[1][1] for line in result[0] if line[1]])
-            confs[angle] = conf
+            # Filter out garbage text AND vertically oriented text boxes!
+            # If the page is sideways, the text boxes will be taller than they are wide.
+            # By only counting horizontal boxes, the wrong orientations will score 0!
+            valid_confs = []
+            for line in result[0]:
+                if not line[1] or line[1][1] <= 0.6:
+                    continue
+                
+                box = line[0]
+                xs = [p[0] for p in box]
+                ys = [p[1] for p in box]
+                w = max(xs) - min(xs)
+                h = max(ys) - min(ys)
+                
+                # Horizontal text should be wider than it is tall.
+                # We use w > h * 0.8 to safely allow single square characters (like "1" or "A")
+                if w > h * 0.8:
+                    valid_confs.append(line[1][1])
+                    
+            confs[angle] = sum(valid_confs)
             
         best_rot = max(confs, key=confs.get)
         max_score = confs[best_rot]
         
         # SAFETY CHECK 1: If the highest score is very low, the model is guessing blindly
-        # SAFETY CHECK 2: If the best rotation is 180, but 0 degrees is very close, bias to 0.
-        if max_score < 10.0:
+        # SAFETY CHECK 2: Bias towards 0 degrees if the best rotation's score is within 
+        # 2.0 points of the 0 degree score. (Reduced from 5.0 since we now filter garbage).
+        if max_score < 5.0:
             print(f"--> Page {page_num} scores too low (max {max_score:.1f}). Defaulting to 0 deg.", flush=True)
             detected_angle = 0
-        elif best_rot == 180 and (confs[180] - confs[0]) < 5.0:
-            print(f"--> Page {page_num} 180 deg ({confs[180]:.1f}) is too close to 0 deg ({confs[0]:.1f}). Defaulting to 0 deg.", flush=True)
+        elif best_rot != 0 and (max_score - confs[0]) < 2.0:
+            print(f"--> Page {page_num} {best_rot} deg ({max_score:.1f}) is too close to 0 deg ({confs[0]:.1f}). Penalizing and defaulting to 0 deg.", flush=True)
             detected_angle = 0
         else:
             # If best_rot is the angle we had to ROTATE it by to make it readable, 

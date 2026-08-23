@@ -1,5 +1,8 @@
 // Auth Check
 const token = localStorage.getItem('access_token');
+window.userFolders = [];
+window.currentViewFolderId = null;
+
 if (!token) {
     window.location.href = '/';
 }
@@ -89,6 +92,29 @@ if (sidebarDashboard) {
     });
 }
 
+// ===== Sidebar Folders Click =====
+const sidebarFoldersLabel = document.getElementById('sidebar-folders-label');
+if (sidebarFoldersLabel) {
+    sidebarFoldersLabel.addEventListener('click', () => {
+        // Deactivate all top tabs since we are on a sidebar view
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+        
+        // Show folders view
+        document.querySelectorAll('.view-section').forEach(s => {
+            s.classList.remove('active');
+            s.classList.add('hidden');
+        });
+        document.getElementById('view-folders').classList.remove('hidden');
+        document.getElementById('view-folders').classList.add('active');
+        
+        // Set sidebar active logic (remove active from dashboard)
+        document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
+        
+        loadFolders();
+        showFoldersList();
+    });
+}
+
 // ===== User Dropdown Toggle =====
 const userProfileArea = document.getElementById('user-profile-area');
 const userDropdown = document.getElementById('user-dropdown');
@@ -120,6 +146,7 @@ async function loadFolders() {
         const res = await fetch('/api/v1/folders', { headers: getAuthHeaders() });
         if(res.ok) {
             const folders = await res.json();
+            window.userFolders = folders;
             
             // Populate sidebar folders
             const sidebarFolders = document.getElementById('sidebar-folders-list');
@@ -132,42 +159,202 @@ async function loadFolders() {
                 } else {
                     sidebarFolders.innerHTML = '';
                     folders.forEach(f => {
-                        sidebarFolders.innerHTML += `
-                            <div class="sidebar-folder-item">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                                </svg>
-                                ${f.name}
-                            </div>
+                        const item = document.createElement('div');
+                        item.className = 'sidebar-folder-item';
+                        item.style.cursor = 'pointer';
+                        item.innerHTML = `
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                            </svg>
+                            <span>${f.name}</span>
+                            <span style="margin-left:auto; font-size:11px; color:var(--text-light);">${f.file_count}</span>
                         `;
+                        item.addEventListener('click', () => {
+                            // Navigate to folders view and open this folder
+                            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                            document.querySelectorAll('.view-section').forEach(s => { s.classList.remove('active'); s.classList.add('hidden'); });
+                            document.getElementById('view-folders').classList.remove('hidden');
+                            document.getElementById('view-folders').classList.add('active');
+                            document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
+                            loadFolderFiles(f.id, f.name);
+                        });
+                        sidebarFolders.appendChild(item);
                     });
                 }
             }
             
             // Populate folders grid view
             if(foldersList) {
-                foldersList.innerHTML = '';
-                folders.forEach(f => {
-                    foldersList.innerHTML += `
-                        <div class="folder-item">
-                            <h3>📁 ${f.name}</h3>
-                            <p>${f.file_count} file(s)</p>
+                if (folders.length === 0) {
+                    foldersList.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 40px; grid-column: 1/-1;">No folders yet. Create one to organize your PDFs.</p>';
+                } else {
+                    foldersList.innerHTML = '';
+                    folders.forEach(f => {
+                        const date = new Date(f.created_at).toLocaleDateString();
+                        foldersList.innerHTML += `
+                            <div class="folder-item" onclick="loadFolderFiles(${f.id}, '${f.name.replace(/'/g, "\\'")}')"> 
+                                <div class="folder-item-top">
+                                    <div class="folder-icon-lg">
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.5">
+                                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                        </svg>
+                                    </div>
+                                    <button class="folder-delete-btn" onclick="event.stopPropagation(); deleteFolder(${f.id})" title="Delete folder">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                                <h3>${f.name}</h3>
+                                <div class="folder-meta">
+                                    <span>${f.file_count} file(s)</span>
+                                    <span>${date}</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+            }
+            
+
+        }
+    } catch(e) { console.error("Error loading folders", e); }
+}
+loadFolders();
+
+async function loadFolderFiles(folderId, folderName) {
+    window.currentViewFolderId = folderId;
+    document.getElementById('folder-detail-name').innerHTML = `${folderName} <button class="icon-btn" onclick="renameFolder(${folderId}, '${folderName}')" title="Rename Folder" style="background:none; border:none; color:var(--text-light); cursor:pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
+    // Hide the folders list and show the detail view
+    document.getElementById('folders-list').classList.add('hidden');
+    document.getElementById('folders-header-card').classList.add('hidden');
+    document.getElementById('folders-view-title').textContent = folderName;
+    document.getElementById('folders-view-subtitle').textContent = 'Files and processing history for this folder.';
+    
+    const detailView = document.getElementById('folder-detail-view');
+    const filesList = document.getElementById('folder-files-list');
+    detailView.classList.remove('hidden');
+    filesList.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 20px;">Loading...</p>';
+    
+    try {
+        const res = await fetch(`/api/v1/folders/${folderId}/files`, { headers: getAuthHeaders() });
+        if (res.ok) {
+            const data = await res.json();
+            const files = data.files || [];
+            const jobs = data.jobs || [];
+            
+            let html = '';
+            
+            // --- Files Section ---
+            if (files.length === 0 && jobs.length === 0) {
+                filesList.innerHTML = `
+                    <div class="folder-empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-light)" stroke-width="1.5">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <h3 style="color: var(--text-muted); font-size: 16px; margin-top: 12px;">This folder is empty</h3>
+                        <p style="color: var(--text-light); font-size: 13px;">Click the <b>+ Upload Here</b> button above, or move a file from your history to this folder.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            if (files.length > 0) {
+                html += `<h3 class="folder-section-title">📄 Files (${files.length})</h3>`;
+                files.forEach(f => {
+                    const date = new Date(f.created_at).toLocaleDateString();
+                    let downloadBtn = '';
+                    if (f.available) {
+                        downloadBtn = `<a href="/api/v1/folders/files/${f.id}/download?token=${token}" class="btn-primary folder-download-btn" style="text-decoration:none;">Download</a>`;
+                    } else {
+                        downloadBtn = `<span class="folder-file-expired">Expired</span>`;
+                    }
+                    
+                    html += `
+                        <div class="folder-file-item">
+                            <div class="folder-file-icon">
+                                <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+                                    <rect x="0.5" y="0.5" width="23" height="27" rx="3" fill="${f.available ? '#F0F4FF' : '#FEF2F2'}" stroke="${f.available ? '#CBD5E1' : '#FECACA'}"/>
+                                    <rect x="5" y="6" width="10" height="1.5" rx="0.75" fill="${f.available ? '#93A3B8' : '#FCA5A5'}"/>
+                                    <rect x="5" y="10" width="14" height="1.5" rx="0.75" fill="${f.available ? '#93A3B8' : '#FCA5A5'}"/>
+                                    <rect x="5" y="14" width="12" height="1.5" rx="0.75" fill="${f.available ? '#93A3B8' : '#FCA5A5'}"/>
+                                </svg>
+                            </div>
+                            <div class="folder-file-info">
+                                <span class="folder-file-name">${f.filename}</span>
+                                <span class="folder-file-date">${date}</span>
+                            </div>
+                            <div class="folder-file-actions">
+                                ${downloadBtn}
+                            </div>
                         </div>
                     `;
                 });
             }
             
-            // Populate dropdown
-            if(select) {
-                select.innerHTML = '<option value="">-- None --</option>';
-                folders.forEach(f => {
-                    select.innerHTML += `<option value="${f.id}">${f.name}</option>`;
+            // --- Jobs Section ---
+            if (jobs.length > 0) {
+                html += `<h3 class="folder-section-title" style="margin-top: 24px;">📋 Processing History (${jobs.length})</h3>`;
+                jobs.forEach(job => {
+                    const date = new Date(job.created_at).toLocaleString();
+                    let statusColor = 'var(--text-muted)';
+                    let statusBg = '#F1F5F9';
+                    let statusText = job.status;
+                    if (job.status === 'SUCCESS') { statusColor = '#16A34A'; statusBg = '#F0FDF4'; statusText = 'Completed'; }
+                    else if (job.status === 'FAILED') { statusColor = '#DC2626'; statusBg = '#FEF2F2'; statusText = 'Failed'; }
+                    else if (job.status === 'PROCESSING') { statusColor = '#D97706'; statusBg = '#FFFBEB'; statusText = 'Processing'; }
+                    
+                    let actionHtml = '';
+                    if (job.status === 'SUCCESS') {
+                        actionHtml = `<a href="/api/v1/download/${job.task_id}?token=${token}" class="btn-primary folder-download-btn" style="text-decoration:none;">Download All</a>`;
+                    }
+                    
+                    html += `
+                        <div class="folder-job-item">
+                            <div class="folder-job-info">
+                                <div class="folder-job-top">
+                                    <span class="folder-job-files">${job.total_files} PDF(s) · ${job.total_pages || 0} pages</span>
+                                    <span style="color: ${statusColor}; background: ${statusBg}; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">${statusText}</span>
+                                </div>
+                                <span class="folder-job-date">${date}</span>
+                            </div>
+                            <div class="folder-job-actions">${actionHtml}</div>
+                        </div>
+                    `;
                 });
             }
+            
+            filesList.innerHTML = html;
         }
-    } catch(e) { console.error("Error loading folders", e); }
+    } catch(e) {
+        filesList.innerHTML = '<p style="color:#ef4444; text-align:center; padding:20px;">Error loading folder contents.</p>';
+    }
 }
-loadFolders();
+
+window.showFoldersList = function() {
+    document.getElementById('folders-list').classList.remove('hidden');
+    document.getElementById('folders-header-card').classList.remove('hidden');
+    document.getElementById('folder-detail-view').classList.add('hidden');
+    document.getElementById('folders-view-title').textContent = 'Your Folders';
+    document.getElementById('folders-view-subtitle').textContent = 'Organize your rotated PDFs into folders.';
+}
+
+window.loadFolderFiles = loadFolderFiles;
+
+async function deleteFolder(folderId) {
+    if (!confirm('Delete this folder and all its file records?')) return;
+    try {
+        const res = await fetch(`/api/v1/folders/${folderId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        if (res.ok) {
+            loadFolders();
+            loadDashboard();
+        } else {
+            alert('Failed to delete folder');
+        }
+    } catch(e) { alert('Error deleting folder'); }
+}
+window.deleteFolder = deleteFolder;
 
 // Add Folder Button
 const addFolderBtn = document.getElementById('add-folder-btn');
@@ -367,7 +554,7 @@ function updateRecentFiles(files) {
 }
 
 // ===== Upload and Process =====
-if(startBtn) startBtn.addEventListener('click', async () => {
+async function processFiles(folderIdOverride = null) {
     if(pendingFiles.length === 0) return;
 
     selectedState.classList.add('hidden');
@@ -383,8 +570,7 @@ if(startBtn) startBtn.addEventListener('click', async () => {
     pendingFiles.forEach(file => formData.append('files', file));
     formData.append('use_gpu', gpuToggle.checked);
     
-    const folderId = document.getElementById('folder-select').value;
-    if (folderId) formData.append('folder_id', folderId);
+    if (folderIdOverride) formData.append('folder_id', folderIdOverride);
 
     try {
         const uploadResponse = await fetch('/api/v1/upload', {
@@ -428,7 +614,7 @@ if(startBtn) startBtn.addEventListener('click', async () => {
     } catch (error) {
         showError("Error uploading files: " + error.message);
     }
-});
+}
 
 function connectWebSocket(taskId) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -473,6 +659,7 @@ function connectWebSocket(taskId) {
             loadPreview(taskId);
             loadFolders();
             loadHistory();
+            loadDashboard();
             
             // Update recent file statuses
             updateRecentFileStatus('Complete');
@@ -493,6 +680,7 @@ function connectWebSocket(taskId) {
         pollTaskStatus(taskId);
     };
 }
+if(startBtn) startBtn.addEventListener('click', () => processFiles());
 
 function updateRecentFileStatus(status) {
     const statusElements = document.querySelectorAll('#recent-files-list .file-status');
@@ -524,16 +712,6 @@ function renderPerFileProgress(filesStatus) {
         `;
     }
     container.innerHTML = html;
-}
-
-function updateRecentFileStatus(status) {
-    const statusElements = document.querySelectorAll('#recent-files-list .file-status');
-    statusElements.forEach(el => {
-        el.textContent = status;
-        if (status === 'Complete') {
-            el.style.color = '#10B981';
-        }
-    });
 }
 
 async function loadPreview(taskId) {
@@ -637,6 +815,7 @@ async function pollTaskStatus(taskId) {
             loadPreview(taskId);
             loadFolders();
             loadHistory();
+            loadDashboard();
         } else if (data.status === 'FAILED') {
             if (countdownInterval) clearInterval(countdownInterval);
             document.getElementById('eta-message').classList.add('hidden');
@@ -673,26 +852,60 @@ async function loadHistory() {
         historyList.innerHTML = '';
         jobs.forEach(job => {
             const date = new Date(job.created_at).toLocaleString();
-            let actionHtml = '';
+            const completedAt = job.completed_at ? new Date(job.completed_at).toLocaleString() : null;
             
+            // Status badge
+            let statusColor = 'var(--text-muted)';
+            let statusBg = '#F1F5F9';
+            let statusText = job.status;
+            if (job.status === 'SUCCESS') { statusColor = '#16A34A'; statusBg = '#F0FDF4'; statusText = 'Completed'; }
+            else if (job.status === 'FAILED') { statusColor = '#DC2626'; statusBg = '#FEF2F2'; statusText = 'Failed'; }
+            else if (job.status === 'PROCESSING') { statusColor = '#D97706'; statusBg = '#FFFBEB'; statusText = 'Processing'; }
+            
+            // Action buttons
+            let actionHtml = '';
             if(job.status === 'SUCCESS') {
-                actionHtml = `<a href="/api/v1/download/${job.task_id}?token=${token}" class="btn-primary" style="padding: 8px 16px; text-decoration: none; font-size: 13px;">Download</a>`;
+                let options = `<option value="">-- Move to Folder --</option>`;
+                window.userFolders.forEach(f => {
+                    options += `<option value="${f.id}" ${f.id == job.folder_id ? 'selected' : ''}>${f.name}</option>`;
+                });
+                let moveSelect = `<select class="form-input" onchange="moveJobToFolder('${job.task_id}', this.value)" style="padding:4px; font-size:11px; margin-left:8px; width:auto; display:inline-block;">${options}</select>`;
+                actionHtml = `<a href="/api/v1/download/${job.task_id}?token=${token}" class="btn-primary" style="padding: 6px 14px; text-decoration: none; font-size: 12px;">Download</a>${moveSelect}`;
             } else if (job.status === 'FAILED') {
-                actionHtml = `<span style="color: #EF4444; font-size: 13px; font-weight: 500;">Failed</span>`;
+                actionHtml = `<span style="font-size: 12px; color: #DC2626;" title="${job.error_message || ''}">Error</span>`;
             } else {
-                actionHtml = `<span style="color: var(--text-light); font-size: 13px;">Processing...</span>`;
+                actionHtml = `<span style="font-size: 12px; color: var(--text-light);">In Progress...</span>`;
+            }
+            
+            // Rotation breakdown
+            let rotationHtml = '';
+            if (job.status === 'SUCCESS' && (job.pages_rotated > 0 || job.pages_unchanged > 0)) {
+                rotationHtml = `
+                    <div class="history-rotation-breakdown">
+                        <span class="rotation-chip rotated">↻ ${job.pages_rotated} rotated</span>
+                        <span class="rotation-chip unchanged">✓ ${job.pages_unchanged} unchanged</span>
+                    </div>
+                `;
             }
             
             historyList.innerHTML += `
                 <div class="history-item">
-                    <div class="details">
-                        <span style="font-weight:600; font-size: 14px;">${job.total_files} PDF(s)</span>
-                        <br>
-                        <span style="font-size: 12px; color: var(--text-light);">${date}</span>
-                        <br>
-                        <span style="font-size: 12px; font-weight: 500; color: ${job.status === 'SUCCESS' ? '#10B981' : job.status === 'FAILED' ? '#EF4444' : 'var(--text-muted)'};">${job.status}</span>
+                    <div class="history-item-left">
+                        <div class="history-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        </div>
+                        <div class="history-details">
+                            <div class="history-top-row">
+                                <span class="history-files">${job.total_files} PDF(s) · ${job.total_pages || 0} pages ${job.folder_name ? ' 📁 ' + job.folder_name : ''}</span>
+                                <span class="history-status-badge" style="color: ${statusColor}; background: ${statusBg};">${statusText}</span>
+                            </div>
+                            <span class="history-date">${date}${completedAt ? ' → ' + completedAt : ''}</span>
+                            ${rotationHtml}
+                        </div>
                     </div>
-                    <div>${actionHtml}</div>
+                    <div class="history-item-right">
+                        ${actionHtml}
+                    </div>
                 </div>
             `;
         });
@@ -730,3 +943,148 @@ function resetUI() {
 
 // Initial load
 loadHistory();
+loadDashboard();
+
+// ===== Dashboard =====
+async function loadDashboard() {
+    try {
+        const res = await fetch('/api/v1/dashboard', { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        document.getElementById('stat-total-files').textContent = data.total_files || 0;
+        document.getElementById('stat-total-pages').textContent = data.total_pages || 0;
+        document.getElementById('stat-pages-rotated').textContent = data.pages_rotated || 0;
+        document.getElementById('stat-folders').textContent = data.folder_count || 0;
+        
+        // Recent jobs table
+        const tbody = document.getElementById('recent-jobs-body');
+        if (tbody) {
+            if (!data.recent_jobs || data.recent_jobs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-light); padding:20px;">No jobs yet. Upload a PDF to get started.</td></tr>';
+            } else {
+                tbody.innerHTML = '';
+                data.recent_jobs.forEach(job => {
+                    const date = new Date(job.created_at).toLocaleDateString();
+                    let statusColor = 'var(--text-muted)';
+                    let statusBg = '#F1F5F9';
+                    let statusText = job.status;
+                    if (job.status === 'SUCCESS') { statusColor = '#16A34A'; statusBg = '#F0FDF4'; statusText = 'Completed'; }
+                    else if (job.status === 'FAILED') { statusColor = '#DC2626'; statusBg = '#FEF2F2'; statusText = 'Failed'; }
+                    else if (job.status === 'PROCESSING') { statusColor = '#D97706'; statusBg = '#FFFBEB'; statusText = 'Processing'; }
+                    
+                    let actionHtml = '';
+                    if (job.status === 'SUCCESS') {
+                        actionHtml = `<a href="/api/v1/download/${job.task_id}?token=${token}" style="color: var(--primary); text-decoration: none; font-weight: 500; font-size: 13px;">Download</a>`;
+                    }
+                    
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${date}</td>
+                            <td>${job.total_files}</td>
+                            <td>${job.total_pages || 0}</td>
+                            <td><span style="color:${statusColor}; background:${statusBg}; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:500;">${statusText}</span></td>
+                            <td>${actionHtml}</td>
+                        </tr>
+                    `;
+                });
+            }
+        }
+    } catch(e) {
+        console.error('Error loading dashboard', e);
+    }
+}
+
+// --- NEW FOLDER FEATURES ---
+
+async function renameFolder(id, currentName) {
+    const newName = prompt("Enter new folder name:", currentName);
+    if (!newName || newName === currentName) return;
+    try {
+        const res = await fetch(`/api/v1/folders/${id}`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ name: newName })
+        });
+        if (res.ok) {
+            loadFolders();
+            document.getElementById('folder-detail-name').innerHTML = `${newName} <button class="icon-btn" onclick="renameFolder(${id}, '${newName}')" title="Rename Folder" style="background:none; border:none; color:var(--text-light); cursor:pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
+        } else alert("Failed to rename");
+    } catch(e) { console.error(e); }
+}
+
+async function moveJobToFolder(taskId, folderId) {
+    try {
+        const res = await fetch(`/api/v1/jobs/${taskId}/move`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ folder_id: folderId ? parseInt(folderId) : null })
+        });
+        if (res.ok) {
+            loadHistory();
+            loadFolders();
+        } else alert("Failed to move job");
+    } catch(e) { console.error(e); }
+}
+
+function uploadToFolder(event) {
+    if(!window.currentViewFolderId) return;
+    pendingFiles = Array.from(event.target.files);
+    if(pendingFiles.length === 0) return;
+    
+    // Switch to upload view manually to use existing process UI
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-files').classList.add('active');
+    document.querySelectorAll('.view-section').forEach(s => { s.classList.remove('active'); s.classList.add('hidden'); });
+    document.getElementById('view-dashboard').classList.remove('hidden');
+    document.getElementById('view-dashboard').classList.add('active');
+    
+    processFiles(window.currentViewFolderId);
+}
+
+function downloadAllFromFolder() {
+    if(!window.currentViewFolderId) return;
+    window.location.href = `/api/v1/folders/${window.currentViewFolderId}/download_all?token=${token}`;
+}
+
+async function mergeFolderPdfs() {
+    if(!window.currentViewFolderId) return;
+    alert("Merging PDFs... this might take a moment. Check the folder in a few seconds.");
+    try {
+        const res = await fetch(`/api/v1/folders/${window.currentViewFolderId}/merge`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        if (res.ok) {
+            loadFolderFiles(window.currentViewFolderId, document.getElementById('folder-detail-name').innerText.trim());
+        } else {
+            const err = await res.json();
+            alert(err.detail || "Failed to merge");
+        }
+    } catch(e) { console.error(e); }
+}
+
+let isFolderGridView = false;
+function toggleFolderGrid() {
+    isFolderGridView = !isFolderGridView;
+    const btn = document.getElementById('grid-toggle-btn');
+    const list = document.getElementById('folder-files-list');
+    btn.textContent = isFolderGridView ? "📄 List View" : "🔲 Grid View";
+    
+    if (isFolderGridView) {
+        list.style.display = 'grid';
+        list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
+    } else {
+        list.style.display = 'flex';
+        list.style.flexDirection = 'column';
+    }
+}
+
+function filterFolderFiles() {
+    const term = document.getElementById('folder-search-input').value.toLowerCase();
+    const items = document.querySelectorAll('.folder-file-item');
+    items.forEach(item => {
+        const text = item.innerText.toLowerCase();
+        item.style.display = text.includes(term) ? '' : 'none';
+    });
+}
