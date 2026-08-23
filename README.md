@@ -11,7 +11,7 @@ It is built for **scale** and **performance**, utilizing a modern microservice a
 ## ✨ Features
 
 - **User Authentication**: Secure user registration and JWT-based login system to manage personal workspaces.
-- **Folder Management**: Organize your processed PDFs into custom folders for better file management.
+- **Folder Management**: Organize your processed PDFs into custom folders. Fully supports renaming, downloading ZIPs, merging PDFs, and individually deleting or batch-deleting multiple PDF files.
 - **Visual Comparison & Manual Override**: Side-by-side before and after comparison of processed pages, with the ability to manually override and fix rotation predictions.
 - **Batch Processing**: Upload multiple PDFs at once and download the processed results as a convenient ZIP file.
 - **Modern Web UI**: Beautiful dark/light mode interface with drag-and-drop support.
