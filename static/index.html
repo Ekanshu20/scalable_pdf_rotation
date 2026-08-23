@@ -411,10 +411,17 @@
                         </div>
                     </div>
                     <div class="folder-tools" style="display:flex; justify-content:space-between; margin-bottom:16px;">
-                        <input type="text" id="folder-search-input" placeholder="Search files..." class="form-input"
-                            style="max-width:300px;" onkeyup="filterFolderFiles()">
-                        <button class="btn-secondary" id="grid-toggle-btn" onclick="toggleFolderGrid()">🔲 Grid
-                            View</button>
+                        <div style="display:flex; align-items:center; gap: 12px; flex:1;">
+                            <input type="text" id="folder-search-input" placeholder="Search files..." class="form-input" style="max-width:300px;" onkeyup="filterFolderFiles()">
+                            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer;">
+                                <input type="checkbox" id="select-all-folder-files" onchange="toggleSelectAllFolderFiles(this.checked)">
+                                Select All
+                            </label>
+                            <button class="btn-secondary" id="delete-selected-folder-files-btn" onclick="deleteSelectedFolderFiles()" style="color: #dc2626; border-color: #fca5a5; display: none; cursor: pointer; padding: 6px 12px; font-size: 13px;">
+                                🗑️ Delete Selected (<span id="selected-folder-files-count">0</span>)
+                            </button>
+                        </div>
+                        <button class="btn-secondary" id="grid-toggle-btn" onclick="toggleFolderGrid()">🔲 Grid View</button>
                     </div>
                     <div id="folder-files-list" class="folder-files-list">
                         <!-- Files injected via JS -->

@@ -217,6 +217,55 @@ def download_folder_file(file_id: int, token: str = None, db: Session = Depends(
     
     return FileResponse(file_record.file_path, media_type="application/pdf", filename=file_record.filename)
 
+@app.delete("/api/v1/folders/files/{file_id}")
+def delete_folder_file(file_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    file_record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Verify the folder belongs to the user
+    folder = db.query(Folder).filter(Folder.id == file_record.folder_id, Folder.user_id == current_user.id).first()
+    if not folder:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    db.delete(file_record)
+    db.commit()
+    
+    if file_record.file_path and os.path.exists(file_record.file_path):
+        try:
+            os.remove(file_record.file_path)
+        except Exception:
+            pass
+            
+    return {"message": "File deleted"}
+
+class DeleteFolderFilesBatchRequest(BaseModel):
+    file_ids: List[int]
+
+@app.post("/api/v1/folders/files/delete-batch")
+def delete_folder_files_batch(request: DeleteFolderFilesBatchRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not request.file_ids:
+        return {"message": "No files specified", "deleted_count": 0}
+        
+    # Get files to check access and paths
+    files_to_delete = db.query(FileRecord).join(Folder).filter(
+        FileRecord.id.in_(request.file_ids),
+        Folder.user_id == current_user.id
+    ).all()
+    
+    deleted_count = 0
+    for f in files_to_delete:
+        if f.file_path and os.path.exists(f.file_path):
+            try:
+                os.remove(f.file_path)
+            except Exception:
+                pass
+        db.delete(f)
+        deleted_count += 1
+        
+    db.commit()
+    return {"message": f"Deleted {deleted_count} files", "deleted_count": deleted_count}
+
 @app.delete("/api/v1/folders/{folder_id}")
 def delete_folder(folder_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()

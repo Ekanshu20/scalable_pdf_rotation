@@ -266,9 +266,16 @@ async function loadFolderFiles(folderId, folderName) {
                     } else {
                         downloadBtn = `<span class="folder-file-expired">Expired</span>`;
                     }
+                    
+                    let deleteBtn = `<button class="btn-secondary folder-delete-file-btn" onclick="deleteFolderFile(${f.id}, ${folderId}, '${folderName}')" style="padding: 8px; margin-left: 8px;" title="Delete File">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                     </button>`;
+
+                    let fileCheckbox = `<input type="checkbox" class="folder-file-checkbox" value="${f.id}" onchange="updateSelectedFolderFilesCount()" style="margin-right: 12px; cursor: pointer;">`;
 
                     html += `
-                        <div class="folder-file-item">
+                        <div class="folder-file-item" style="display:flex; align-items:center;">
+                            ${fileCheckbox}
                             <div class="folder-file-icon">
                                 <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
                                     <rect x="0.5" y="0.5" width="23" height="27" rx="3" fill="${f.available ? '#F0F4FF' : '#FEF2F2'}" stroke="${f.available ? '#CBD5E1' : '#FECACA'}"/>
@@ -281,8 +288,9 @@ async function loadFolderFiles(folderId, folderName) {
                                 <span class="folder-file-name" title="${f.filename}">${f.filename}</span>
                                 <span class="folder-file-date">${date}</span>
                             </div>
-                            <div class="folder-file-actions">
+                            <div class="folder-file-actions" style="display:flex; align-items:center;">
                                 ${downloadBtn}
+                                ${deleteBtn}
                             </div>
                         </div>
                     `;
@@ -290,9 +298,65 @@ async function loadFolderFiles(folderId, folderName) {
             }
 
             filesList.innerHTML = html;
+            updateSelectedFolderFilesCount(); // reset UI state
         }
     } catch (e) {
         filesList.innerHTML = '<p style="color:#ef4444; text-align:center; padding:20px;">Error loading folder contents.</p>';
+    }
+}
+
+window.toggleSelectAllFolderFiles = function(checked) {
+    document.querySelectorAll('.folder-file-checkbox').forEach(cb => {
+        cb.checked = checked;
+    });
+    updateSelectedFolderFilesCount();
+}
+
+window.updateSelectedFolderFilesCount = function() {
+    const selectedCount = document.querySelectorAll('.folder-file-checkbox:checked').length;
+    const btn = document.getElementById('delete-selected-folder-files-btn');
+    const countSpan = document.getElementById('selected-folder-files-count');
+    const selectAllCb = document.getElementById('select-all-folder-files');
+    
+    const totalCount = document.querySelectorAll('.folder-file-checkbox').length;
+    
+    if (selectAllCb && totalCount > 0) {
+        selectAllCb.checked = (selectedCount === totalCount && totalCount > 0);
+    } else if (selectAllCb) {
+        selectAllCb.checked = false;
+    }
+    
+    if (btn && countSpan) {
+        if (selectedCount > 0) {
+            btn.style.display = 'inline-flex';
+            countSpan.textContent = selectedCount;
+        } else {
+            btn.style.display = 'none';
+        }
+    }
+}
+
+window.deleteSelectedFolderFiles = async function() {
+    const selectedIds = Array.from(document.querySelectorAll('.folder-file-checkbox:checked')).map(cb => parseInt(cb.value));
+    if (selectedIds.length === 0) return;
+    
+    if (!confirm(`Delete ${selectedIds.length} selected files?`)) return;
+    
+    try {
+        const res = await fetch('/api/v1/folders/files/delete-batch', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ file_ids: selectedIds })
+        });
+        if (res.ok) {
+            const folderName = document.getElementById('folder-detail-name').childNodes[0].textContent.trim();
+            loadFolderFiles(window.currentViewFolderId, folderName);
+            loadFolders(); // refresh folder stats
+        } else {
+            alert('Failed to delete files');
+        }
+    } catch (e) {
+        alert('Error deleting files');
     }
 }
 
@@ -322,6 +386,24 @@ async function deleteFolder(folderId) {
     } catch (e) { alert('Error deleting folder'); }
 }
 window.deleteFolder = deleteFolder;
+
+window.deleteFolderFile = async function(fileId, folderId, folderName) {
+    if (!confirm('Delete this file from the folder?')) return;
+    try {
+        const res = await fetch(`/api/v1/folders/files/${fileId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        if (res.ok) {
+            loadFolderFiles(folderId, folderName);
+            loadFolders(); // refresh folder stats
+        } else {
+            alert('Failed to delete file');
+        }
+    } catch (e) {
+        alert('Error deleting file');
+    }
+};
 
 // Add Folder Button
 const addFolderBtn = document.getElementById('add-folder-btn');
