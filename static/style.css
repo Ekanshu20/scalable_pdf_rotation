@@ -497,7 +497,7 @@ body {
     padding: 0;
     box-shadow: var(--card-shadow);
     border: 1px solid var(--border);
-    max-width: 680px;
+    max-width: 1000px;
     margin: 0 auto 28px;
     overflow: hidden;
 }
@@ -608,7 +608,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-width: 680px;
+    max-width: 1000px;
     margin: 0 auto;
 }
 
@@ -1002,6 +1002,49 @@ body {
     border-radius: 4px;
 }
 
+/* ===== Folder Grid View Overrides ===== */
+.folder-files-list.grid-view-active {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+}
+
+.folder-files-list.grid-view-active .folder-file-item {
+    flex-direction: column;
+    text-align: center;
+    padding: 24px 16px;
+    gap: 12px;
+    height: 100%;
+    align-items: center;
+}
+
+.folder-files-list.grid-view-active .folder-file-info {
+    align-items: center;
+}
+
+.folder-files-list.grid-view-active .folder-file-name {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.folder-files-list.grid-view-active .folder-file-actions {
+    margin-left: 0;
+    margin-top: auto;
+    width: 100%;
+}
+
+.folder-files-list.grid-view-active .folder-download-btn {
+    width: 100%;
+    display: block;
+    box-sizing: border-box;
+}
+
+
 .folder-section-title {
     font-size: 15px;
     font-weight: 600;
@@ -1070,9 +1113,10 @@ body {
 /* ===== Dashboard Stats Grid ===== */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
     gap: 16px;
-    margin-bottom: 28px;
+    max-width: 1000px;
+    margin: 0 auto 28px;
 }
 
 .stat-card {

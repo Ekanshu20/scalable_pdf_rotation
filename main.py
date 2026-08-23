@@ -368,6 +368,16 @@ def get_dashboard(current_user: User = Depends(get_current_user), db: Session = 
     recent_jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(5).all()
     recent = []
     for j in recent_jobs:
+        filenames = []
+        if j.status == JobStatus.SUCCESS.value:
+            try:
+                task_result = AsyncResult(j.task_id, app=celery_app)
+                if task_result.status == 'SUCCESS' and task_result.result:
+                    page_rotations = task_result.result.get('page_rotations', {})
+                    filenames = list(page_rotations.keys())
+            except Exception:
+                pass
+
         recent.append({
             "task_id": j.task_id,
             "status": j.status,
@@ -375,6 +385,7 @@ def get_dashboard(current_user: User = Depends(get_current_user), db: Session = 
             "total_pages": j.total_pages,
             "created_at": j.created_at.isoformat(),
             "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            "filenames": filenames,
         })
     
     return {
@@ -518,14 +529,16 @@ async def get_history(current_user: User = Depends(get_current_user), db: Sessio
     
     result = []
     for j in jobs:
-        # Try to get rotation breakdown from Celery result
+        # Try to get rotation breakdown and filenames from Celery result
         pages_rotated = 0
         pages_unchanged = 0
+        filenames = []
         if j.status == JobStatus.SUCCESS.value:
             try:
                 task_result = AsyncResult(j.task_id, app=celery_app)
                 if task_result.status == 'SUCCESS' and task_result.result:
                     page_rotations = task_result.result.get('page_rotations', {})
+                    filenames = list(page_rotations.keys())
                     for fname, rotations in page_rotations.items():
                         for pnum, rot in rotations.items():
                             if rot == 0:
@@ -553,9 +566,41 @@ async def get_history(current_user: User = Depends(get_current_user), db: Sessio
             "error_message": j.error_message,
             "folder_id": j.folder_id,
             "folder_name": folder_name,
+            "filenames": filenames,
         })
     
     return result
+
+class DeleteHistoryBatchRequest(BaseModel):
+    task_ids: List[str]
+
+@app.delete("/api/v1/history/{task_id}")
+def delete_history_job(task_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.task_id == task_id, Job.user_id == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    db.delete(job)
+    db.commit()
+    return {"message": "Job deleted from history"}
+
+@app.post("/api/v1/history/delete-batch")
+def delete_history_batch(request: DeleteHistoryBatchRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not request.task_ids:
+        return {"message": "No jobs specified", "deleted_count": 0}
+    
+    count = db.query(Job).filter(
+        Job.task_id.in_(request.task_ids),
+        Job.user_id == current_user.id
+    ).delete(synchronize_session=False)
+    
+    db.commit()
+    return {"message": f"Deleted {count} history entries", "deleted_count": count}
+
+@app.delete("/api/v1/history")
+def clear_all_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db.query(Job).filter(Job.user_id == current_user.id).delete()
+    db.commit()
+    return {"message": "All history cleared"}
 
 @app.get("/api/v1/status/{task_id}")
 async def get_status(task_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

@@ -32,7 +32,7 @@ async function loadUser() {
         } else {
             throw new Error("Unauthorized");
         }
-    } catch(e) {
+    } catch (e) {
         localStorage.removeItem('access_token');
         window.location.href = '/';
     }
@@ -43,11 +43,11 @@ loadUser();
 document.querySelectorAll('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
         const tabName = tab.dataset.tab;
-        
+
         // Update active tab
         document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-        
+
         // Show appropriate view
         document.querySelectorAll('.view-section').forEach(s => {
             s.classList.remove('active');
@@ -77,7 +77,7 @@ if (sidebarDashboard) {
         // Activate files tab
         document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
         document.getElementById('tab-files').classList.add('active');
-        
+
         // Show dashboard view
         document.querySelectorAll('.view-section').forEach(s => {
             s.classList.remove('active');
@@ -85,7 +85,7 @@ if (sidebarDashboard) {
         });
         document.getElementById('view-dashboard').classList.remove('hidden');
         document.getElementById('view-dashboard').classList.add('active');
-        
+
         // Set sidebar active
         document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
         sidebarDashboard.classList.add('active');
@@ -98,7 +98,7 @@ if (sidebarFoldersLabel) {
     sidebarFoldersLabel.addEventListener('click', () => {
         // Deactivate all top tabs since we are on a sidebar view
         document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-        
+
         // Show folders view
         document.querySelectorAll('.view-section').forEach(s => {
             s.classList.remove('active');
@@ -106,10 +106,10 @@ if (sidebarFoldersLabel) {
         });
         document.getElementById('view-folders').classList.remove('hidden');
         document.getElementById('view-folders').classList.add('active');
-        
+
         // Set sidebar active logic (remove active from dashboard)
         document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
-        
+
         loadFolders();
         showFoldersList();
     });
@@ -124,7 +124,7 @@ if (userProfileArea && userDropdown) {
         e.stopPropagation();
         userDropdown.classList.toggle('hidden');
     });
-    
+
     document.addEventListener('click', () => {
         userDropdown.classList.add('hidden');
     });
@@ -132,7 +132,7 @@ if (userProfileArea && userDropdown) {
 
 // Logout logic
 const logoutBtn = document.getElementById('logout-btn-top');
-if(logoutBtn) {
+if (logoutBtn) {
     logoutBtn.addEventListener('click', (e) => {
         e.preventDefault();
         localStorage.removeItem('access_token');
@@ -144,16 +144,16 @@ if(logoutBtn) {
 async function loadFolders() {
     try {
         const res = await fetch('/api/v1/folders', { headers: getAuthHeaders() });
-        if(res.ok) {
+        if (res.ok) {
             const folders = await res.json();
             window.userFolders = folders;
-            
+
             // Populate sidebar folders
             const sidebarFolders = document.getElementById('sidebar-folders-list');
             const foldersList = document.getElementById('folders-list');
             const select = document.getElementById('folder-select');
-            
-            if(sidebarFolders) {
+
+            if (sidebarFolders) {
                 if (folders.length === 0) {
                     sidebarFolders.innerHTML = '<p style="padding: 7px 14px; font-size: 12px; color: var(--text-light);">No folders yet</p>';
                 } else {
@@ -182,9 +182,9 @@ async function loadFolders() {
                     });
                 }
             }
-            
+
             // Populate folders grid view
-            if(foldersList) {
+            if (foldersList) {
                 if (folders.length === 0) {
                     foldersList.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 40px; grid-column: 1/-1;">No folders yet. Create one to organize your PDFs.</p>';
                 } else {
@@ -213,10 +213,10 @@ async function loadFolders() {
                     });
                 }
             }
-            
+
 
         }
-    } catch(e) { console.error("Error loading folders", e); }
+    } catch (e) { console.error("Error loading folders", e); }
 }
 loadFolders();
 
@@ -228,25 +228,25 @@ async function loadFolderFiles(folderId, folderName) {
     document.getElementById('folders-header-card').classList.add('hidden');
     document.getElementById('folders-view-title').textContent = folderName;
     document.getElementById('folders-view-subtitle').textContent = 'Files and processing history for this folder.';
-    
+
     const detailView = document.getElementById('folder-detail-view');
     const filesList = document.getElementById('folder-files-list');
     detailView.classList.remove('hidden');
     filesList.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 20px;">Loading...</p>';
-    
+
     try {
         const res = await fetch(`/api/v1/folders/${folderId}/files`, { headers: getAuthHeaders() });
         if (res.ok) {
             const data = await res.json();
             const files = data.files || [];
             const jobs = data.jobs || [];
-            
+
             let html = '';
-            
+
             // --- Files Section ---
-            if (files.length === 0 && jobs.length === 0) {
+            if (files.length === 0) {
                 filesList.innerHTML = `
-                    <div class="folder-empty-state">
+                    <div class="folder-empty-state" style="grid-column: 1/-1;">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-light)" stroke-width="1.5">
                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                         </svg>
@@ -256,9 +256,8 @@ async function loadFolderFiles(folderId, folderName) {
                 `;
                 return;
             }
-            
+
             if (files.length > 0) {
-                html += `<h3 class="folder-section-title">📄 Files (${files.length})</h3>`;
                 files.forEach(f => {
                     const date = new Date(f.created_at).toLocaleDateString();
                     let downloadBtn = '';
@@ -267,7 +266,7 @@ async function loadFolderFiles(folderId, folderName) {
                     } else {
                         downloadBtn = `<span class="folder-file-expired">Expired</span>`;
                     }
-                    
+
                     html += `
                         <div class="folder-file-item">
                             <div class="folder-file-icon">
@@ -279,7 +278,7 @@ async function loadFolderFiles(folderId, folderName) {
                                 </svg>
                             </div>
                             <div class="folder-file-info">
-                                <span class="folder-file-name">${f.filename}</span>
+                                <span class="folder-file-name" title="${f.filename}">${f.filename}</span>
                                 <span class="folder-file-date">${date}</span>
                             </div>
                             <div class="folder-file-actions">
@@ -289,47 +288,15 @@ async function loadFolderFiles(folderId, folderName) {
                     `;
                 });
             }
-            
-            // --- Jobs Section ---
-            if (jobs.length > 0) {
-                html += `<h3 class="folder-section-title" style="margin-top: 24px;">📋 Processing History (${jobs.length})</h3>`;
-                jobs.forEach(job => {
-                    const date = new Date(job.created_at).toLocaleString();
-                    let statusColor = 'var(--text-muted)';
-                    let statusBg = '#F1F5F9';
-                    let statusText = job.status;
-                    if (job.status === 'SUCCESS') { statusColor = '#16A34A'; statusBg = '#F0FDF4'; statusText = 'Completed'; }
-                    else if (job.status === 'FAILED') { statusColor = '#DC2626'; statusBg = '#FEF2F2'; statusText = 'Failed'; }
-                    else if (job.status === 'PROCESSING') { statusColor = '#D97706'; statusBg = '#FFFBEB'; statusText = 'Processing'; }
-                    
-                    let actionHtml = '';
-                    if (job.status === 'SUCCESS') {
-                        actionHtml = `<a href="/api/v1/download/${job.task_id}?token=${token}" class="btn-primary folder-download-btn" style="text-decoration:none;">Download All</a>`;
-                    }
-                    
-                    html += `
-                        <div class="folder-job-item">
-                            <div class="folder-job-info">
-                                <div class="folder-job-top">
-                                    <span class="folder-job-files">${job.total_files} PDF(s) · ${job.total_pages || 0} pages</span>
-                                    <span style="color: ${statusColor}; background: ${statusBg}; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">${statusText}</span>
-                                </div>
-                                <span class="folder-job-date">${date}</span>
-                            </div>
-                            <div class="folder-job-actions">${actionHtml}</div>
-                        </div>
-                    `;
-                });
-            }
-            
+
             filesList.innerHTML = html;
         }
-    } catch(e) {
+    } catch (e) {
         filesList.innerHTML = '<p style="color:#ef4444; text-align:center; padding:20px;">Error loading folder contents.</p>';
     }
 }
 
-window.showFoldersList = function() {
+window.showFoldersList = function () {
     document.getElementById('folders-list').classList.remove('hidden');
     document.getElementById('folders-header-card').classList.remove('hidden');
     document.getElementById('folder-detail-view').classList.add('hidden');
@@ -352,7 +319,7 @@ async function deleteFolder(folderId) {
         } else {
             alert('Failed to delete folder');
         }
-    } catch(e) { alert('Error deleting folder'); }
+    } catch (e) { alert('Error deleting folder'); }
 }
 window.deleteFolder = deleteFolder;
 
@@ -372,7 +339,7 @@ async function createFolder() {
             body: JSON.stringify({ name })
         });
         loadFolders();
-    } catch(e) { alert("Failed to create folder"); }
+    } catch (e) { alert("Failed to create folder"); }
 }
 
 // ===== Folders Toggle =====
@@ -412,24 +379,24 @@ const STARTUP_OVERHEAD = 10;
 
 // ===== Drag Events =====
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-    if(dropZone) dropZone.addEventListener(eventName, preventDefaults, false);
+    if (dropZone) dropZone.addEventListener(eventName, preventDefaults, false);
 });
 function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
 ['dragenter', 'dragover'].forEach(eventName => {
-    if(dropZone) dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+    if (dropZone) dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
 });
 ['dragleave', 'drop'].forEach(eventName => {
-    if(dropZone) dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+    if (dropZone) dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
 });
 
-if(dropZone) dropZone.addEventListener('drop', handleDrop, false);
+if (dropZone) dropZone.addEventListener('drop', handleDrop, false);
 function handleDrop(e) {
     const dt = e.dataTransfer;
-    if(dt.files.length) stageFiles(dt.files);
+    if (dt.files.length) stageFiles(dt.files);
 }
 
-if(fileInput) fileInput.addEventListener('change', function() {
-    if(this.files.length) stageFiles(this.files);
+if (fileInput) fileInput.addEventListener('change', function () {
+    if (this.files.length) stageFiles(this.files);
 });
 
 async function getPageCount(file) {
@@ -452,25 +419,25 @@ function formatSize(bytes) {
 
 async function stageFiles(files) {
     const pdfFiles = Array.from(files).filter(file => file.name.toLowerCase().endsWith('.pdf'));
-    if(pdfFiles.length === 0) {
+    if (pdfFiles.length === 0) {
         alert("Please upload at least one PDF file.");
         return;
     }
-    
+
     // Keep previously staged files if they drop more
     if (!pendingFiles) pendingFiles = [];
     pendingFiles = pendingFiles.concat(pdfFiles);
-    
+
     dropZone.classList.add('hidden');
-    
+
     // Hide folder select area and action cards
     const folderArea = document.getElementById('folder-select-area');
     if (folderArea) folderArea.style.display = 'none';
     const actionCards = document.getElementById('action-cards');
     if (actionCards) actionCards.style.display = 'none';
-    
+
     selectedState.classList.remove('hidden');
-    
+
     await renderFileList();
     updateRecentFiles(pendingFiles);
 }
@@ -479,19 +446,19 @@ async function renderFileList() {
     const tbody = document.getElementById('file-list-body');
     const summary = document.getElementById('selected-summary');
     if (!tbody || !summary) return;
-    
+
     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Loading pages...</td></tr>';
-    
+
     let totalPages = 0;
     let html = '';
-    
+
     for (let i = 0; i < pendingFiles.length; i++) {
         const file = pendingFiles[i];
         if (file.pageCount === undefined) {
             file.pageCount = await getPageCount(file);
         }
         if (typeof file.pageCount === 'number') totalPages += file.pageCount;
-        
+
         html += `
             <tr>
                 <td>
@@ -510,12 +477,12 @@ async function renderFileList() {
             </tr>
         `;
     }
-    
+
     tbody.innerHTML = html;
     summary.textContent = `${pendingFiles.length} file(s) • ${totalPages} pages`;
 }
 
-window.removeFile = function(index) {
+window.removeFile = function (index) {
     pendingFiles.splice(index, 1);
     if (pendingFiles.length === 0) {
         resetUI();
@@ -528,10 +495,10 @@ window.removeFile = function(index) {
 function updateRecentFiles(files) {
     const recentList = document.getElementById('recent-files-list');
     if (!recentList) return;
-    
+
     recentList.innerHTML = '';
     const filesToShow = Array.from(files).slice(0, 3);
-    
+
     filesToShow.forEach(file => {
         recentList.innerHTML += `
             <div class="recent-file-item">
@@ -555,21 +522,21 @@ function updateRecentFiles(files) {
 
 // ===== Upload and Process =====
 async function processFiles(folderIdOverride = null) {
-    if(pendingFiles.length === 0) return;
+    if (pendingFiles.length === 0) return;
 
     selectedState.classList.add('hidden');
     errorState.classList.add('hidden');
     loadingState.classList.remove('hidden');
     progressContainer.classList.add('hidden');
     progressBar.style.width = '0%';
-    
+
     document.getElementById('loading-title').textContent = "Uploading...";
     loadingMessage.textContent = `Transferring ${pendingFiles.length} file(s) to server...`;
 
     const formData = new FormData();
     pendingFiles.forEach(file => formData.append('files', file));
     formData.append('use_gpu', gpuToggle.checked);
-    
+
     if (folderIdOverride) formData.append('folder_id', folderIdOverride);
 
     try {
@@ -587,20 +554,20 @@ async function processFiles(folderIdOverride = null) {
         const result = await uploadResponse.json();
         const taskId = result.task_id;
         const totalPages = result.total_pages || 0;
-        
+
         document.getElementById('loading-title').textContent = "Processing PDFs...";
         loadingMessage.textContent = `Waiting for AI worker to start...`;
         progressContainer.classList.remove('hidden');
-        
+
         const etaMessage = document.getElementById('eta-message');
         etaMessage.classList.remove('hidden');
-        
+
         const secondsPerPage = gpuToggle.checked ? SEC_PER_PAGE_GPU : SEC_PER_PAGE_CPU;
         let estimatedSeconds = (totalPages * secondsPerPage) + STARTUP_OVERHEAD;
-        
+
         if (countdownInterval) clearInterval(countdownInterval);
         etaMessage.textContent = `Estimated Time Remaining: ~${estimatedSeconds}s`;
-        
+
         countdownInterval = setInterval(() => {
             estimatedSeconds--;
             if (estimatedSeconds > 0) {
@@ -609,7 +576,7 @@ async function processFiles(folderIdOverride = null) {
                 etaMessage.textContent = `Almost done...`;
             }
         }, 1000);
-        
+
         connectWebSocket(taskId);
     } catch (error) {
         showError("Error uploading files: " + error.message);
@@ -620,10 +587,10 @@ function connectWebSocket(taskId) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/progress/${taskId}`;
     const ws = new WebSocket(wsUrl);
-    
+
     const pollInterval = setInterval(() => {
-        if(ws.readyState === WebSocket.OPEN) {
-            fetch(`/api/v1/status/${taskId}`, {headers: getAuthHeaders()})
+        if (ws.readyState === WebSocket.OPEN) {
+            fetch(`/api/v1/status/${taskId}`, { headers: getAuthHeaders() })
                 .then(res => res.json())
                 .then(data => {
                     if (data.status === 'SUCCESS' || data.status === 'FAILED') {
@@ -641,12 +608,12 @@ function connectWebSocket(taskId) {
             const completed = data.completed_files || 0;
             const total = data.total_files || pendingFiles.length;
             loadingMessage.textContent = `Processing ${completed}/${total}...`;
-            if(total > 0) progressBar.style.width = `${Math.min((completed / total) * 100, 100)}%`;
-            
+            if (total > 0) progressBar.style.width = `${Math.min((completed / total) * 100, 100)}%`;
+
             if (data.files_status) {
                 renderPerFileProgress(data.files_status);
             }
-        } 
+        }
         else if (data.status === 'SUCCESS') {
             if (countdownInterval) clearInterval(countdownInterval);
             document.getElementById('eta-message').classList.add('hidden');
@@ -660,7 +627,7 @@ function connectWebSocket(taskId) {
             loadFolders();
             loadHistory();
             loadDashboard();
-            
+
             // Update recent file statuses
             updateRecentFileStatus('Complete');
         }
@@ -672,7 +639,7 @@ function connectWebSocket(taskId) {
             showError(data.error || "Unknown processing error");
         }
     };
-    
+
     ws.onerror = (error) => {
         console.error("WebSocket Error:", error);
         clearInterval(pollInterval);
@@ -680,7 +647,7 @@ function connectWebSocket(taskId) {
         pollTaskStatus(taskId);
     };
 }
-if(startBtn) startBtn.addEventListener('click', () => processFiles());
+if (startBtn) startBtn.addEventListener('click', () => processFiles());
 
 function updateRecentFileStatus(status) {
     const statusElements = document.querySelectorAll('#recent-files-list .file-status');
@@ -695,7 +662,7 @@ function updateRecentFileStatus(status) {
 function renderPerFileProgress(filesStatus) {
     const container = document.getElementById('per-file-progress');
     if (!container) return;
-    
+
     let html = '';
     for (const [filename, status] of Object.entries(filesStatus)) {
         let statusClass = 'queued';
@@ -703,7 +670,7 @@ function renderPerFileProgress(filesStatus) {
         if (status === 'processing') { statusClass = 'processing'; statusText = 'Processing...'; }
         else if (status === 'done') { statusClass = 'done'; statusText = 'Done'; }
         else if (status === 'failed') { statusClass = 'failed'; statusText = 'Failed'; }
-        
+
         html += `
             <div class="progress-row">
                 <span class="progress-filename" title="${filename}">${filename}</span>
@@ -716,13 +683,13 @@ function renderPerFileProgress(filesStatus) {
 
 async function loadPreview(taskId) {
     try {
-        const response = await fetch(`/api/v1/compare/${taskId}`, {headers: getAuthHeaders()});
-        if(response.ok) {
+        const response = await fetch(`/api/v1/compare/${taskId}`, { headers: getAuthHeaders() });
+        if (response.ok) {
             const data = await response.json();
             renderComparisonUI(taskId, data);
             previewContainer.classList.remove('hidden');
         }
-    } catch(err) {
+    } catch (err) {
         console.error("Failed to load comparison preview", err);
     }
 }
@@ -739,7 +706,7 @@ function renderComparisonUI(taskId, filesData) {
                 </div>
                 <div class="comparison-grid">
         `;
-        
+
         pages.forEach(page => {
             let rotationText = page.rotation === 0 ? 'No change' : `Rotated ${page.rotation}°`;
             html += `
@@ -766,24 +733,24 @@ function renderComparisonUI(taskId, filesData) {
                 </div>
             `;
         });
-        
+
         html += `</div></div>`;
     });
     previewContainer.innerHTML = html;
 }
 
-window.overridePage = async function(taskId, filename, pageNum, rotation) {
+window.overridePage = async function (taskId, filename, pageNum, rotation) {
     try {
         const res = await fetch(`/api/v1/override/${taskId}`, {
             method: 'POST',
             headers: getAuthHeaders(),
             body: JSON.stringify({ filename, page: pageNum, rotation })
         });
-        if(res.ok) {
+        if (res.ok) {
             const data = await res.json();
             const imgId = `corrected-img-${taskId}-${filename.replace(/[^a-zA-Z0-9]/g, '')}-${pageNum}`;
             document.getElementById(imgId).src = `data:image/png;base64,${data.image}`;
-            
+
             // Show toast
             const toast = document.createElement('div');
             toast.textContent = 'Page rotated successfully';
@@ -800,11 +767,11 @@ window.overridePage = async function(taskId, filename, pageNum, rotation) {
 
 async function pollTaskStatus(taskId) {
     try {
-        const response = await fetch(`/api/v1/status/${taskId}`, {headers: getAuthHeaders()});
+        const response = await fetch(`/api/v1/status/${taskId}`, { headers: getAuthHeaders() });
         if (!response.ok) throw new Error("Failed to check status");
-        
+
         const data = await response.json();
-        
+
         if (data.status === 'SUCCESS') {
             if (countdownInterval) clearInterval(countdownInterval);
             document.getElementById('eta-message').classList.add('hidden');
@@ -823,7 +790,7 @@ async function pollTaskStatus(taskId) {
         } else {
             if (data.details) {
                 loadingMessage.textContent = data.details.status || `Processing... (${data.status})`;
-                if(data.details.total_files) {
+                if (data.details.total_files) {
                     progressBar.style.width = `${Math.min(((data.details.completed_files || 0) / data.details.total_files) * 100, 100)}%`;
                 }
             }
@@ -838,22 +805,23 @@ async function loadHistory() {
     const historyList = document.getElementById('history-list');
     if (!historyList) return;
     historyList.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 20px;">Loading...</p>';
-    
+
     try {
-        const response = await fetch('/api/v1/history', {headers: getAuthHeaders()});
-        if(!response.ok) throw new Error("Failed to fetch history");
-        
+        const response = await fetch('/api/v1/history', { headers: getAuthHeaders() });
+        if (!response.ok) throw new Error("Failed to fetch history");
+
         const jobs = await response.json();
-        if(jobs.length === 0) {
+        if (jobs.length === 0) {
             historyList.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 40px;">No recent jobs found.</p>';
+            updateSelectedHistoryCount();
             return;
         }
-        
+
         historyList.innerHTML = '';
         jobs.forEach(job => {
             const date = new Date(job.created_at).toLocaleString();
             const completedAt = job.completed_at ? new Date(job.completed_at).toLocaleString() : null;
-            
+
             // Status badge
             let statusColor = 'var(--text-muted)';
             let statusBg = '#F1F5F9';
@@ -861,10 +829,10 @@ async function loadHistory() {
             if (job.status === 'SUCCESS') { statusColor = '#16A34A'; statusBg = '#F0FDF4'; statusText = 'Completed'; }
             else if (job.status === 'FAILED') { statusColor = '#DC2626'; statusBg = '#FEF2F2'; statusText = 'Failed'; }
             else if (job.status === 'PROCESSING') { statusColor = '#D97706'; statusBg = '#FFFBEB'; statusText = 'Processing'; }
-            
+
             // Action buttons
             let actionHtml = '';
-            if(job.status === 'SUCCESS') {
+            if (job.status === 'SUCCESS') {
                 let options = `<option value="">-- Move to Folder --</option>`;
                 window.userFolders.forEach(f => {
                     options += `<option value="${f.id}" ${f.id == job.folder_id ? 'selected' : ''}>${f.name}</option>`;
@@ -876,7 +844,7 @@ async function loadHistory() {
             } else {
                 actionHtml = `<span style="font-size: 12px; color: var(--text-light);">In Progress...</span>`;
             }
-            
+
             // Rotation breakdown
             let rotationHtml = '';
             if (job.status === 'SUCCESS' && (job.pages_rotated > 0 || job.pages_unchanged > 0)) {
@@ -887,10 +855,16 @@ async function loadHistory() {
                     </div>
                 `;
             }
-            
+
+            let filenamesHtml = '';
+            if (job.filenames && job.filenames.length > 0) {
+                filenamesHtml = `<div class="history-filenames" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">📄 ${job.filenames.join(', ')}</div>`;
+            }
+
             historyList.innerHTML += `
-                <div class="history-item">
+                <div class="history-item" data-folder="${job.folder_name || ''}" data-filenames="${(job.filenames || []).join(' ')}">
                     <div class="history-item-left">
+                        <input type="checkbox" class="history-checkbox" value="${job.task_id}" onchange="updateSelectedHistoryCount()" style="margin-right: 12px; cursor: pointer; transform: scale(1.15);">
                         <div class="history-icon">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                         </div>
@@ -899,19 +873,37 @@ async function loadHistory() {
                                 <span class="history-files">${job.total_files} PDF(s) · ${job.total_pages || 0} pages ${job.folder_name ? ' 📁 ' + job.folder_name : ''}</span>
                                 <span class="history-status-badge" style="color: ${statusColor}; background: ${statusBg};">${statusText}</span>
                             </div>
+                            ${filenamesHtml}
                             <span class="history-date">${date}${completedAt ? ' → ' + completedAt : ''}</span>
                             ${rotationHtml}
                         </div>
                     </div>
-                    <div class="history-item-right">
+                    <div class="history-item-right" style="display: flex; align-items: center; gap: 8px;">
                         ${actionHtml}
+                        <button onclick="deleteHistoryJob('${job.task_id}')" class="btn-secondary" title="Delete from history" style="padding: 6px 10px; color: #dc2626; border-color: #fca5a5; cursor: pointer;">🗑️</button>
                     </div>
                 </div>
             `;
         });
+        updateSelectedHistoryCount();
     } catch (err) {
         historyList.innerHTML = `<p style="color:#ef4444; text-align: center; padding: 20px;">Error loading history.</p>`;
     }
+}
+
+function filterHistoryFiles() {
+    const term = document.getElementById('history-search-input').value.toLowerCase();
+    const items = document.querySelectorAll('.history-item');
+    items.forEach(item => {
+        const folderName = (item.getAttribute('data-folder') || '').toLowerCase();
+        const fileNames = (item.getAttribute('data-filenames') || '').toLowerCase();
+
+        if (folderName.includes(term) || fileNames.includes(term)) {
+            item.style.display = '';
+        } else {
+            item.style.display = 'none';
+        }
+    });
 }
 
 function showError(msg) {
@@ -931,9 +923,9 @@ function resetUI() {
     previewContainer.classList.add('hidden');
     dropZone.classList.remove('hidden');
     fileInput.value = "";
-    
+
     document.getElementById('per-file-progress').innerHTML = '';
-    
+
     // Show folder select area and action cards again
     const folderArea = document.getElementById('folder-select-area');
     if (folderArea) folderArea.style.display = '';
@@ -951,12 +943,12 @@ async function loadDashboard() {
         const res = await fetch('/api/v1/dashboard', { headers: getAuthHeaders() });
         if (!res.ok) return;
         const data = await res.json();
-        
+
         document.getElementById('stat-total-files').textContent = data.total_files || 0;
         document.getElementById('stat-total-pages').textContent = data.total_pages || 0;
         document.getElementById('stat-pages-rotated').textContent = data.pages_rotated || 0;
         document.getElementById('stat-folders').textContent = data.folder_count || 0;
-        
+
         // Recent jobs table
         const tbody = document.getElementById('recent-jobs-body');
         if (tbody) {
@@ -972,12 +964,12 @@ async function loadDashboard() {
                     if (job.status === 'SUCCESS') { statusColor = '#16A34A'; statusBg = '#F0FDF4'; statusText = 'Completed'; }
                     else if (job.status === 'FAILED') { statusColor = '#DC2626'; statusBg = '#FEF2F2'; statusText = 'Failed'; }
                     else if (job.status === 'PROCESSING') { statusColor = '#D97706'; statusBg = '#FFFBEB'; statusText = 'Processing'; }
-                    
+
                     let actionHtml = '';
                     if (job.status === 'SUCCESS') {
                         actionHtml = `<a href="/api/v1/download/${job.task_id}?token=${token}" style="color: var(--primary); text-decoration: none; font-weight: 500; font-size: 13px;">Download</a>`;
                     }
-                    
+
                     tbody.innerHTML += `
                         <tr>
                             <td>${date}</td>
@@ -990,7 +982,7 @@ async function loadDashboard() {
                 });
             }
         }
-    } catch(e) {
+    } catch (e) {
         console.error('Error loading dashboard', e);
     }
 }
@@ -1010,7 +1002,7 @@ async function renameFolder(id, currentName) {
             loadFolders();
             document.getElementById('folder-detail-name').innerHTML = `${newName} <button class="icon-btn" onclick="renameFolder(${id}, '${newName}')" title="Rename Folder" style="background:none; border:none; color:var(--text-light); cursor:pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
         } else alert("Failed to rename");
-    } catch(e) { console.error(e); }
+    } catch (e) { console.error(e); }
 }
 
 async function moveJobToFolder(taskId, folderId) {
@@ -1024,31 +1016,31 @@ async function moveJobToFolder(taskId, folderId) {
             loadHistory();
             loadFolders();
         } else alert("Failed to move job");
-    } catch(e) { console.error(e); }
+    } catch (e) { console.error(e); }
 }
 
 function uploadToFolder(event) {
-    if(!window.currentViewFolderId) return;
+    if (!window.currentViewFolderId) return;
     pendingFiles = Array.from(event.target.files);
-    if(pendingFiles.length === 0) return;
-    
+    if (pendingFiles.length === 0) return;
+
     // Switch to upload view manually to use existing process UI
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.getElementById('tab-files').classList.add('active');
     document.querySelectorAll('.view-section').forEach(s => { s.classList.remove('active'); s.classList.add('hidden'); });
     document.getElementById('view-dashboard').classList.remove('hidden');
     document.getElementById('view-dashboard').classList.add('active');
-    
+
     processFiles(window.currentViewFolderId);
 }
 
 function downloadAllFromFolder() {
-    if(!window.currentViewFolderId) return;
+    if (!window.currentViewFolderId) return;
     window.location.href = `/api/v1/folders/${window.currentViewFolderId}/download_all?token=${token}`;
 }
 
 async function mergeFolderPdfs() {
-    if(!window.currentViewFolderId) return;
+    if (!window.currentViewFolderId) return;
     alert("Merging PDFs... this might take a moment. Check the folder in a few seconds.");
     try {
         const res = await fetch(`/api/v1/folders/${window.currentViewFolderId}/merge`, {
@@ -1061,7 +1053,7 @@ async function mergeFolderPdfs() {
             const err = await res.json();
             alert(err.detail || "Failed to merge");
         }
-    } catch(e) { console.error(e); }
+    } catch (e) { console.error(e); }
 }
 
 let isFolderGridView = false;
@@ -1070,13 +1062,11 @@ function toggleFolderGrid() {
     const btn = document.getElementById('grid-toggle-btn');
     const list = document.getElementById('folder-files-list');
     btn.textContent = isFolderGridView ? "📄 List View" : "🔲 Grid View";
-    
+
     if (isFolderGridView) {
-        list.style.display = 'grid';
-        list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
+        list.classList.add('grid-view-active');
     } else {
-        list.style.display = 'flex';
-        list.style.flexDirection = 'column';
+        list.classList.remove('grid-view-active');
     }
 }
 
@@ -1088,3 +1078,80 @@ function filterFolderFiles() {
         item.style.display = text.includes(term) ? '' : 'none';
     });
 }
+
+// --- History Selection & Deletion Functions ---
+
+function updateSelectedHistoryCount() {
+    const checkboxes = document.querySelectorAll('.history-checkbox:checked');
+    const count = checkboxes.length;
+    const btn = document.getElementById('delete-selected-history-btn');
+    const countSpan = document.getElementById('selected-history-count');
+    const selectAllCb = document.getElementById('select-all-history-jobs');
+    const allCheckboxes = document.querySelectorAll('.history-checkbox');
+
+    if (countSpan) countSpan.textContent = count;
+    if (btn) btn.style.display = count > 0 ? 'inline-block' : 'none';
+    if (selectAllCb) {
+        selectAllCb.checked = (allCheckboxes.length > 0 && count === allCheckboxes.length);
+    }
+}
+window.updateSelectedHistoryCount = updateSelectedHistoryCount;
+
+function toggleSelectAllHistory(checked) {
+    const checkboxes = document.querySelectorAll('.history-checkbox');
+    checkboxes.forEach(cb => cb.checked = checked);
+    updateSelectedHistoryCount();
+}
+window.toggleSelectAllHistory = toggleSelectAllHistory;
+
+async function deleteHistoryJob(taskId) {
+    try {
+        const res = await fetch(`/api/v1/history/${taskId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        if (res.ok) {
+            loadHistory();
+            loadDashboard();
+        }
+    } catch (e) {
+        console.error('Error deleting history item', e);
+    }
+}
+window.deleteHistoryJob = deleteHistoryJob;
+
+async function deleteSelectedHistoryJobs() {
+    const checked = Array.from(document.querySelectorAll('.history-checkbox:checked')).map(cb => cb.value);
+    if (checked.length === 0) return;
+
+    try {
+        const res = await fetch('/api/v1/history/delete-batch', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ task_ids: checked })
+        });
+        if (res.ok) {
+            loadHistory();
+            loadDashboard();
+        }
+    } catch (e) {
+        console.error('Error deleting history items', e);
+    }
+}
+window.deleteSelectedHistoryJobs = deleteSelectedHistoryJobs;
+
+async function clearAllHistory() {
+    try {
+        const res = await fetch('/api/v1/history', {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        if (res.ok) {
+            loadHistory();
+            loadDashboard();
+        }
+    } catch (e) {
+        console.error('Error clearing history', e);
+    }
+}
+window.clearAllHistory = clearAllHistory;
