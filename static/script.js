@@ -39,6 +39,48 @@ async function loadUser() {
 }
 loadUser();
 
+// ===== Sidebar Hamburger & Resizer =====
+const sidebar = document.getElementById('sidebar');
+const toggleBtn = document.getElementById('sidebar-toggle-btn');
+const resizer = document.getElementById('sidebar-resizer');
+
+if (toggleBtn && sidebar) {
+    toggleBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('collapsed');
+    });
+}
+
+if (resizer && sidebar) {
+    let isResizing = false;
+    let startX, startWidth;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = parseInt(document.defaultView.getComputedStyle(sidebar).width, 10);
+        sidebar.classList.add('is-resizing');
+        document.body.style.cursor = 'col-resize';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const newWidth = startWidth + (e.clientX - startX);
+        if (newWidth >= 150 && newWidth <= 600) {
+            sidebar.style.width = newWidth + 'px';
+            sidebar.style.minWidth = newWidth + 'px';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            sidebar.classList.remove('is-resizing');
+            document.body.style.cursor = '';
+        }
+    });
+}
+
 // ===== Navigation: Top Navbar Tabs =====
 document.querySelectorAll('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
