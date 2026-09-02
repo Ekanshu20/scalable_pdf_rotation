@@ -40,3 +40,8 @@ jobs.db
 
 # Models & Test Data
 paddleocr_models/
+
+# Executables
+*.exe
+
+*.pdf

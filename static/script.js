@@ -235,9 +235,11 @@ async function loadFolders() {
                         const date = new Date(f.created_at).toLocaleDateString();
                         foldersList.innerHTML += `
                             <div class="folder-item" onclick="loadFolderFiles(${f.id}, '${f.name.replace(/'/g, "\\'")}')"> 
-                                <div class="folder-item-top">
-                                    <div class="folder-icon-lg">
-                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.5">
+                                <div class="folder-item-top" style="display: flex; align-items: flex-start; justify-content: space-between;">
+                                    <div style="display: flex; align-items: flex-start; gap: 8px;">
+                                        <input type="checkbox" class="folder-checkbox" value="${f.id}" onclick="event.stopPropagation(); updateSelectedFoldersCount()" style="cursor: pointer; transform: scale(1.15); margin-top: 4px;">
+                                        <div class="folder-icon-lg">
+                                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.5">
                                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                                         </svg>
                                     </div>
@@ -1209,12 +1211,14 @@ function updateSelectedHistoryCount() {
     const checkboxes = document.querySelectorAll('.history-checkbox:checked');
     const count = checkboxes.length;
     const btn = document.getElementById('delete-selected-history-btn');
+    const downloadBtn = document.getElementById('download-selected-history-btn');
     const countSpan = document.getElementById('selected-history-count');
     const selectAllCb = document.getElementById('select-all-history-jobs');
     const allCheckboxes = document.querySelectorAll('.history-checkbox');
 
     if (countSpan) countSpan.textContent = count;
     if (btn) btn.style.display = count > 0 ? 'inline-block' : 'none';
+    if (downloadBtn) downloadBtn.style.display = count > 0 ? 'inline-block' : 'none';
     if (selectAllCb) {
         selectAllCb.checked = (allCheckboxes.length > 0 && count === allCheckboxes.length);
     }
@@ -1279,3 +1283,55 @@ async function clearAllHistory() {
     }
 }
 window.clearAllHistory = clearAllHistory;
+
+function downloadSelectedHistoryJobs() {
+    const checked = Array.from(document.querySelectorAll('.history-checkbox:checked')).map(cb => cb.value);
+    if (checked.length === 0) return;
+    const taskIds = checked.join(',');
+    window.location.href = `/api/v1/download_bulk?task_ids=${taskIds}&token=${token}`;
+}
+window.downloadSelectedHistoryJobs = downloadSelectedHistoryJobs;
+
+function downloadAllFolders() {
+    if (!window.userFolders || window.userFolders.length === 0) {
+        alert("No folders to download.");
+        return;
+    }
+    const folderIds = window.userFolders.map(f => f.id).join(',');
+    window.location.href = `/api/v1/download_bulk?folder_ids=${folderIds}&token=${token}`;
+}
+window.downloadAllFolders = downloadAllFolders;
+
+function updateSelectedFoldersCount() {
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    const count = checkboxes.length;
+    const downloadBtn = document.getElementById('download-selected-folders-btn');
+    const selectAllCb = document.getElementById('select-all-folders');
+    const allCheckboxes = document.querySelectorAll('.folder-checkbox');
+
+    if (downloadBtn) {
+        downloadBtn.style.display = count > 0 ? 'inline-block' : 'none';
+        if (count > 0) {
+            downloadBtn.textContent = `⬇️ Download Selected (${count})`;
+        }
+    }
+    if (selectAllCb) {
+        selectAllCb.checked = (allCheckboxes.length > 0 && count === allCheckboxes.length);
+    }
+}
+window.updateSelectedFoldersCount = updateSelectedFoldersCount;
+
+function toggleSelectAllFolders(checked) {
+    const checkboxes = document.querySelectorAll('.folder-checkbox');
+    checkboxes.forEach(cb => cb.checked = checked);
+    updateSelectedFoldersCount();
+}
+window.toggleSelectAllFolders = toggleSelectAllFolders;
+
+function downloadSelectedFolders() {
+    const checked = Array.from(document.querySelectorAll('.folder-checkbox:checked')).map(cb => cb.value);
+    if (checked.length === 0) return;
+    const folderIds = checked.join(',');
+    window.location.href = `/api/v1/download_bulk?folder_ids=${folderIds}&token=${token}`;
+}
+window.downloadSelectedFolders = downloadSelectedFolders;

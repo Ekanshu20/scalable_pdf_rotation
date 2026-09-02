@@ -357,6 +357,9 @@
                         </label>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
+                        <button class="btn-primary" id="download-selected-history-btn" onclick="downloadSelectedHistoryJobs()" style="display: none; cursor: pointer; padding: 6px 12px; font-size: 13px;">
+                            ⬇️ Download Selected
+                        </button>
                         <button class="btn-secondary" id="delete-selected-history-btn" onclick="deleteSelectedHistoryJobs()" style="color: #dc2626; border-color: #fca5a5; display: none; cursor: pointer;">
                             🗑️ Delete Selected (<span id="selected-history-count">0</span>)
                         </button>
@@ -378,8 +381,18 @@
                     <h1 id="folders-view-title">Your Folders</h1>
                     <p class="content-subtitle" id="folders-view-subtitle">Organize your rotated PDFs into folders.</p>
                 </div>
-                <div class="folders-header-card" id="folders-header-card">
-                    <button class="btn-primary" onclick="createFolder()">+ New Folder</button>
+                <div class="folders-header-card" id="folders-header-card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button class="btn-primary" onclick="createFolder()">+ New Folder</button>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer;">
+                            <input type="checkbox" id="select-all-folders" onchange="toggleSelectAllFolders(this.checked)">
+                            Select All
+                        </label>
+                        <button class="btn-primary" onclick="downloadSelectedFolders()" id="download-selected-folders-btn" style="display: none; padding: 6px 12px; font-size: 13px;">⬇️ Download Selected</button>
+                        <button class="btn-secondary" onclick="downloadAllFolders()" id="download-all-folders-btn">⬇️ Download All</button>
+                    </div>
                 </div>
                 <div id="folders-list" class="grid-list">
                     <!-- Folders injected via JS -->

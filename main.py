@@ -349,6 +349,63 @@ def download_folder_all(folder_id: int, token: str = None, db: Session = Depends
     
     return FileResponse(zip_filepath, media_type="application/zip", filename=zip_filename)
 
+@app.get("/api/v1/download_bulk")
+def download_bulk(task_ids: str = "", folder_ids: str = "", token: str = None, db: Session = Depends(get_db)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+        
+    tasks = [t.strip() for t in task_ids.split(",") if t.strip()]
+    folders = [int(f.strip()) for f in folder_ids.split(",") if f.strip().isdigit()]
+    
+    if not tasks and not folders:
+        raise HTTPException(status_code=400, detail="No tasks or folders specified")
+        
+    files_to_zip = [] # list of (filepath, arcname)
+    
+    # Collect files from tasks
+    for task_id in tasks:
+        job = db.query(Job).filter(Job.task_id == task_id, Job.user_id == user.id).first()
+        if job and job.status == 'SUCCESS':
+            task_result = AsyncResult(task_id, app=celery_app)
+            if task_result.status == 'SUCCESS' and task_result.result:
+                output_folder = task_result.result.get("output_folder")
+                if output_folder and os.path.exists(output_folder):
+                    for filename in os.listdir(output_folder):
+                        path = os.path.join(output_folder, filename)
+                        arcname = f"job_{task_id[:8]}/{filename}"
+                        files_to_zip.append((path, arcname))
+                        
+    # Collect files from folders
+    for fid in folders:
+        folder = db.query(Folder).filter(Folder.id == fid, Folder.user_id == user.id).first()
+        if folder:
+            file_records = db.query(FileRecord).filter(FileRecord.folder_id == fid).all()
+            for fr in file_records:
+                if fr.file_path and os.path.exists(fr.file_path):
+                    arcname = f"folder_{folder.name}/{fr.filename}"
+                    files_to_zip.append((fr.file_path, arcname))
+                    
+    if not files_to_zip:
+        raise HTTPException(status_code=404, detail="No files found to download")
+        
+    zip_filename = f"bulk_download_{uuid.uuid4().hex[:8]}.zip"
+    zip_filepath = os.path.join(BASE_TMP_DIR, zip_filename)
+    
+    with zipfile.ZipFile(zip_filepath, 'w') as zipf:
+        for path, arcname in files_to_zip:
+            zipf.write(path, arcname=arcname)
+            
+    return FileResponse(zip_filepath, media_type="application/zip", filename="bulk_download.zip")
+
 @app.post("/api/v1/folders/{folder_id}/merge")
 def merge_folder_pdfs(folder_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
