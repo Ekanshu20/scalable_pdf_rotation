@@ -1,11 +1,14 @@
 name: Continuous Delivery
 
 on:
-  push:
-    branches: [ "main" ]
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types:
+      - completed
 
 jobs:
   push-to-registry:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -28,7 +31,7 @@ jobs:
           context: .
           file: ./Dockerfile.api
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/scalable-pdf-api:latest
+          tags: ghcr.io/ekanshu20/scalable-pdf-api:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -38,6 +41,6 @@ jobs:
           context: .
           file: ./Dockerfile.worker
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/scalable-pdf-worker:latest
+          tags: ghcr.io/ekanshu20/scalable-pdf-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
