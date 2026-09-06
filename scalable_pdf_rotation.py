@@ -86,7 +86,6 @@ def analyze_page_rotation(pdf_path, page_num):
     3. Use text_recognizer on cropped boxes to resolve 90 vs 270.
     4. Use text_classifier on cropped boxes to resolve 0 vs 180.
     """
-    global _ocr_model
     
     try:
         doc = fitz.open(pdf_path)
