@@ -36,9 +36,12 @@ def process_pdf_rotation(self, input_folder: str, output_folder: str, use_gpu: b
     # Mark state as processing
     self.update_state(state='PROCESSING', meta={'status': 'Starting rotation pipeline...', 'completed_files': 0, 'total_files': 0})
     
-    def progress_callback(completed, total, filename, files_status):
+    def progress_callback(completed, total, filename, files_status, stats=None):
+        stats = stats or {}
         # Update celery state
-        self.update_state(state='PROCESSING', meta={'status': f'Processing {filename}...', 'completed_files': completed, 'total_files': total})
+        meta = {'status': f'Processing {filename}...', 'completed_files': completed, 'total_files': total}
+        meta.update(stats)
+        self.update_state(state='PROCESSING', meta=meta)
         # Publish real-time to redis for websockets
         message = json.dumps({
             "task_id": self.request.id,
@@ -46,7 +49,9 @@ def process_pdf_rotation(self, input_folder: str, output_folder: str, use_gpu: b
             "completed_files": completed,
             "total_files": total,
             "filename": filename,
-            "files_status": files_status
+            "files_status": files_status,
+            # Measured throughput - lets the UI show a real ETA instead of a guess
+            **stats
         })
         redis_client.publish(f"task_progress_{self.request.id}", message)
 

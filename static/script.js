@@ -102,6 +102,8 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
             // Also set sidebar dashboard as active
             document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
             document.getElementById('sidebar-dashboard').classList.add('active');
+        } else if (tabName === 'folders') {
+            showFoldersView();
         } else if (tabName === 'history') {
             document.getElementById('view-history').classList.remove('hidden');
             document.getElementById('view-history').classList.add('active');
@@ -134,28 +136,118 @@ if (sidebarDashboard) {
     });
 }
 
-// ===== Sidebar Folders Click =====
-const sidebarFoldersLabel = document.getElementById('sidebar-folders-label');
-if (sidebarFoldersLabel) {
-    sidebarFoldersLabel.addEventListener('click', () => {
-        // Deactivate all top tabs since we are on a sidebar view
-        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+// ===== In-app dialogs =====
+// Replaces native alert/confirm/prompt, which render as browser chrome ("localhost
+// says...") and block the page. These are styled, dismissible, and promise-based so
+// call sites read the same as before.
 
-        // Show folders view
-        document.querySelectorAll('.view-section').forEach(s => {
-            s.classList.remove('active');
-            s.classList.add('hidden');
-        });
-        document.getElementById('view-folders').classList.remove('hidden');
-        document.getElementById('view-folders').classList.add('active');
+function toast(message, type = 'error') {
+    let stack = document.getElementById('toast-stack');
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'toast-stack';
+        stack.className = 'toast-stack';
+        document.body.appendChild(stack);
+    }
 
-        // Set sidebar active logic (remove active from dashboard)
-        document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.innerHTML = `
+        <span class="toast-icon">${type === 'success' ? '✓' : type === 'info' ? 'ℹ' : '!'}</span>
+        <span class="toast-msg"></span>
+        <button type="button" class="toast-close" aria-label="Dismiss">×</button>
+    `;
+    el.querySelector('.toast-msg').textContent = message;
 
-        loadFolders();
-        showFoldersList();
+    const remove = () => {
+        el.classList.add('leaving');
+        setTimeout(() => el.remove(), 180);
+    };
+    el.querySelector('.toast-close').addEventListener('click', remove);
+    stack.appendChild(el);
+    setTimeout(remove, type === 'error' ? 6000 : 4000);
+}
+window.toast = toast;
+
+function openModal({ title, message, confirmLabel = 'Confirm', danger = false, input = null }) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <h3 class="modal-title"></h3>
+                <p class="modal-message"></p>
+                ${input !== null ? '<input type="text" class="form-input modal-input">' : ''}
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
+                    <button type="button" class="${danger ? 'btn-danger' : 'btn-primary'} modal-confirm"></button>
+                </div>
+            </div>
+        `;
+        overlay.querySelector('.modal-title').textContent = title;
+        overlay.querySelector('.modal-message').textContent = message || '';
+        overlay.querySelector('.modal-confirm').textContent = confirmLabel;
+
+        const field = overlay.querySelector('.modal-input');
+        if (field) field.value = input;
+
+        const close = value => {
+            document.removeEventListener('keydown', onKey);
+            overlay.remove();
+            resolve(value);
+        };
+        const accept = () => close(field ? (field.value.trim() || null) : true);
+        const onKey = e => {
+            if (e.key === 'Escape') close(field ? null : false);
+            if (e.key === 'Enter' && field) accept();
+        };
+
+        overlay.querySelector('.modal-cancel').addEventListener('click', () => close(field ? null : false));
+        overlay.querySelector('.modal-confirm').addEventListener('click', accept);
+        overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(field ? null : false); });
+        document.addEventListener('keydown', onKey);
+
+        document.body.appendChild(overlay);
+        (field || overlay.querySelector('.modal-confirm')).focus();
     });
 }
+
+function confirmDialog(title, message, confirmLabel = 'Delete') {
+    return openModal({ title, message, confirmLabel, danger: true });
+}
+
+function promptDialog(title, message, value = '', confirmLabel = 'Save') {
+    return openModal({ title, message, confirmLabel, input: value });
+}
+
+// ===== Folders navigation =====
+// Reachable from the top nav tab, the sidebar item, and the sidebar section label -
+// all of them land on the full folder list, never inside a folder.
+function showFoldersView() {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    const tab = document.getElementById('tab-folders');
+    if (tab) tab.classList.add('active');
+
+    document.querySelectorAll('.view-section').forEach(s => {
+        s.classList.remove('active');
+        s.classList.add('hidden');
+    });
+    document.getElementById('view-folders').classList.remove('hidden');
+    document.getElementById('view-folders').classList.add('active');
+
+    document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
+    const sidebarItem = document.getElementById('sidebar-folders');
+    if (sidebarItem) sidebarItem.classList.add('active');
+
+    loadFolders();
+    showFoldersList();
+}
+window.showFoldersView = showFoldersView;
+
+['sidebar-folders-label', 'sidebar-folders'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', showFoldersView);
+});
 
 // ===== User Dropdown Toggle =====
 const userProfileArea = document.getElementById('user-profile-area');
@@ -214,6 +306,8 @@ async function loadFolders() {
                         item.addEventListener('click', () => {
                             // Navigate to folders view and open this folder
                             document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                            const foldersTab = document.getElementById('tab-folders');
+                            if (foldersTab) foldersTab.classList.add('active');
                             document.querySelectorAll('.view-section').forEach(s => { s.classList.remove('active'); s.classList.add('hidden'); });
                             document.getElementById('view-folders').classList.remove('hidden');
                             document.getElementById('view-folders').classList.add('active');
@@ -234,12 +328,12 @@ async function loadFolders() {
                     folders.forEach(f => {
                         const date = new Date(f.created_at).toLocaleDateString();
                         foldersList.innerHTML += `
-                            <div class="folder-item" onclick="loadFolderFiles(${f.id}, '${f.name.replace(/'/g, "\\'")}')"> 
-                                <div class="folder-item-top" style="display: flex; align-items: flex-start; justify-content: space-between;">
-                                    <div style="display: flex; align-items: flex-start; gap: 8px;">
-                                        <input type="checkbox" class="folder-checkbox" value="${f.id}" onclick="event.stopPropagation(); updateSelectedFoldersCount()" style="cursor: pointer; transform: scale(1.15); margin-top: 4px;">
-                                        <div class="folder-icon-lg">
-                                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.5">
+                            <div class="folder-item" onclick="loadFolderFiles(${f.id}, '${jsArg(f.name)}')">
+                                <div class="folder-item-top">
+                                    <input type="checkbox" class="folder-checkbox" value="${f.id}"
+                                           onclick="event.stopPropagation(); updateSelectedFoldersCount()">
+                                    <div class="folder-icon-lg">
+                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.5">
                                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                                         </svg>
                                     </div>
@@ -247,10 +341,10 @@ async function loadFolders() {
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                     </button>
                                 </div>
-                                <h3>${f.name}</h3>
+                                <h3 class="folder-item-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</h3>
                                 <div class="folder-meta">
-                                    <span>${f.file_count} file(s)</span>
-                                    <span>${date}</span>
+                                    <span class="folder-file-count">${f.file_count} file${f.file_count === 1 ? '' : 's'}</span>
+                                    <span class="folder-date">${date}</span>
                                 </div>
                             </div>
                         `;
@@ -266,12 +360,24 @@ loadFolders();
 
 async function loadFolderFiles(folderId, folderName) {
     window.currentViewFolderId = folderId;
-    document.getElementById('folder-detail-name').innerHTML = `${folderName} <button class="icon-btn" onclick="renameFolder(${folderId}, '${folderName}')" title="Rename Folder" style="background:none; border:none; color:var(--text-light); cursor:pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
+    window.viewingUnfiled = (folderId === null || folderId === undefined);
+
+    const renameBtn = window.viewingUnfiled ? '' : `<button class="icon-btn" onclick="renameFolder(${folderId}, '${folderName}')" title="Rename Folder" style="background:none; border:none; color:var(--text-light); cursor:pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
+    document.getElementById('folder-detail-name').innerHTML = `${folderName} ${renameBtn}`;
+
+    // Folder-only bulk actions don't apply to the virtual "unfiled" view
+    const downloadZipBtn = document.getElementById('folder-download-zip-btn');
+    const mergeBtn = document.getElementById('folder-merge-btn');
+    if (downloadZipBtn) downloadZipBtn.classList.toggle('hidden', window.viewingUnfiled);
+    if (mergeBtn) mergeBtn.classList.toggle('hidden', window.viewingUnfiled);
+
     // Hide the folders list and show the detail view
     document.getElementById('folders-list').classList.add('hidden');
     document.getElementById('folders-header-card').classList.add('hidden');
     document.getElementById('folders-view-title').textContent = folderName;
-    document.getElementById('folders-view-subtitle').textContent = 'Files and processing history for this folder.';
+    document.getElementById('folders-view-subtitle').textContent = window.viewingUnfiled
+        ? 'PDFs uploaded without picking a folder.'
+        : 'Files and processing history for this folder.';
 
     const detailView = document.getElementById('folder-detail-view');
     const filesList = document.getElementById('folder-files-list');
@@ -279,7 +385,8 @@ async function loadFolderFiles(folderId, folderName) {
     filesList.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 20px;">Loading...</p>';
 
     try {
-        const res = await fetch(`/api/v1/folders/${folderId}/files`, { headers: getAuthHeaders() });
+        const url = window.viewingUnfiled ? '/api/v1/files/unfiled' : `/api/v1/folders/${folderId}/files`;
+        const res = await fetch(url, { headers: getAuthHeaders() });
         if (res.ok) {
             const data = await res.json();
             const files = data.files || [];
@@ -294,8 +401,8 @@ async function loadFolderFiles(folderId, folderName) {
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-light)" stroke-width="1.5">
                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                         </svg>
-                        <h3 style="color: var(--text-muted); font-size: 16px; margin-top: 12px;">This folder is empty</h3>
-                        <p style="color: var(--text-light); font-size: 13px;">Click the <b>+ Upload Here</b> button above, or move a file from your history to this folder.</p>
+                        <h3 style="color: var(--text-muted); font-size: 16px; margin-top: 12px;">${window.viewingUnfiled ? 'No unfiled uploads' : 'This folder is empty'}</h3>
+                        <p style="color: var(--text-light); font-size: 13px;">${window.viewingUnfiled ? 'PDFs uploaded from the dashboard without picking a folder will show up here.' : 'Click the <b>+ Upload Here</b> button above, or move a file from your history to this folder.'}</p>
                     </div>
                 `;
                 return;
@@ -384,7 +491,7 @@ window.deleteSelectedFolderFiles = async function() {
     const selectedIds = Array.from(document.querySelectorAll('.folder-file-checkbox:checked')).map(cb => parseInt(cb.value));
     if (selectedIds.length === 0) return;
     
-    if (!confirm(`Delete ${selectedIds.length} selected files?`)) return;
+    if (!await confirmDialog('Delete files', `${selectedIds.length} selected file(s) will be permanently deleted.`, 'Delete files')) return;
     
     try {
         const res = await fetch('/api/v1/folders/files/delete-batch', {
@@ -397,25 +504,30 @@ window.deleteSelectedFolderFiles = async function() {
             loadFolderFiles(window.currentViewFolderId, folderName);
             loadFolders(); // refresh folder stats
         } else {
-            alert('Failed to delete files');
+            toast('Failed to delete files');
         }
     } catch (e) {
-        alert('Error deleting files');
+        toast('Error deleting files');
     }
 }
 
 window.showFoldersList = function () {
+    // Leaving the detail view means we're no longer inside any folder - clear the
+    // context too, or actions like "Upload Here" keep targeting the folder you left.
+    window.currentViewFolderId = null;
+    window.viewingUnfiled = false;
+
     document.getElementById('folders-list').classList.remove('hidden');
     document.getElementById('folders-header-card').classList.remove('hidden');
     document.getElementById('folder-detail-view').classList.add('hidden');
     document.getElementById('folders-view-title').textContent = 'Your Folders';
-    document.getElementById('folders-view-subtitle').textContent = 'Organize your rotated PDFs into folders.';
+    document.getElementById('folders-view-subtitle').textContent = 'All of your folders.';
 }
 
 window.loadFolderFiles = loadFolderFiles;
 
 async function deleteFolder(folderId) {
-    if (!confirm('Delete this folder and all its file records?')) return;
+    if (!await confirmDialog('Delete folder', 'This folder and its file records will be deleted. The processed PDFs themselves are not removed.', 'Delete folder')) return;
     try {
         const res = await fetch(`/api/v1/folders/${folderId}`, {
             method: 'DELETE',
@@ -425,14 +537,14 @@ async function deleteFolder(folderId) {
             loadFolders();
             loadDashboard();
         } else {
-            alert('Failed to delete folder');
+            toast('Failed to delete folder');
         }
-    } catch (e) { alert('Error deleting folder'); }
+    } catch (e) { toast('Error deleting folder'); }
 }
 window.deleteFolder = deleteFolder;
 
 window.deleteFolderFile = async function(fileId, folderId, folderName) {
-    if (!confirm('Delete this file from the folder?')) return;
+    if (!await confirmDialog('Delete file', 'This file will be permanently deleted from the folder.', 'Delete file')) return;
     try {
         const res = await fetch(`/api/v1/folders/files/${fileId}`, {
             method: 'DELETE',
@@ -442,10 +554,10 @@ window.deleteFolderFile = async function(fileId, folderId, folderName) {
             loadFolderFiles(folderId, folderName);
             loadFolders(); // refresh folder stats
         } else {
-            alert('Failed to delete file');
+            toast('Failed to delete file');
         }
     } catch (e) {
-        alert('Error deleting file');
+        toast('Error deleting file');
     }
 };
 
@@ -456,7 +568,7 @@ if (addFolderBtn) {
 }
 
 async function createFolder() {
-    const name = prompt("Enter folder name:");
+    const name = await promptDialog('New folder', 'Give the folder a name.', '', 'Create folder');
     if (!name) return;
     try {
         await fetch('/api/v1/folders', {
@@ -465,7 +577,7 @@ async function createFolder() {
             body: JSON.stringify({ name })
         });
         loadFolders();
-    } catch (e) { alert("Failed to create folder"); }
+    } catch (e) { toast("Failed to create folder"); }
 }
 
 // ===== Folders Toggle =====
@@ -494,14 +606,10 @@ const loadingMessage = document.getElementById('loading-message');
 const errorMessage = document.getElementById('error-message');
 const progressBar = document.getElementById('progress-bar');
 const progressContainer = document.getElementById('progress-container');
-const previewContainer = document.getElementById('preview-container');
 const previewImg = document.getElementById('preview-img');
 
 let pendingFiles = [];
 let countdownInterval = null;
-const SEC_PER_PAGE_GPU = 5;
-const SEC_PER_PAGE_CPU = 15;
-const STARTUP_OVERHEAD = 10;
 
 // ===== Drag Events =====
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -546,7 +654,7 @@ function formatSize(bytes) {
 async function stageFiles(files) {
     const pdfFiles = Array.from(files).filter(file => file.name.toLowerCase().endsWith('.pdf'));
     if (pdfFiles.length === 0) {
-        alert("Please upload at least one PDF file.");
+        toast("Please upload at least one PDF file.");
         return;
     }
 
@@ -646,6 +754,48 @@ function updateRecentFiles(files) {
     });
 }
 
+// ===== ETA =====
+// Driven by the worker's measured pages/second, not a per-page constant. The local
+// tick just counts down smoothly between server updates.
+let etaState = { seconds: null, pagesDone: 0, totalPages: 0 };
+
+function formatDuration(seconds) {
+    if (seconds < 60) return `${Math.max(seconds, 1)}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins < 60) return secs ? `${mins}m ${secs}s` : `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    return `${hours}h ${mins % 60}m`;
+}
+
+function renderEta() {
+    const el = document.getElementById('eta-message');
+    if (!el) return;
+
+    const { seconds, pagesDone, totalPages } = etaState;
+    const pages = totalPages ? ` · ${pagesDone}/${totalPages} pages` : '';
+
+    if (seconds === null) {
+        el.textContent = `Estimating time remaining…${pages}`;
+    } else if (seconds <= 0) {
+        el.textContent = `Finishing up…${pages}`;
+    } else {
+        el.textContent = `About ${formatDuration(seconds)} remaining${pages}`;
+    }
+}
+
+function tickEta() {
+    if (etaState.seconds !== null && etaState.seconds > 0) etaState.seconds -= 1;
+    renderEta();
+}
+
+function updateEtaFromProgress(data) {
+    if (typeof data.completed_pages === 'number') etaState.pagesDone = data.completed_pages;
+    if (typeof data.total_pages === 'number' && data.total_pages) etaState.totalPages = data.total_pages;
+    if (data.eta_seconds !== undefined && data.eta_seconds !== null) etaState.seconds = data.eta_seconds;
+    renderEta();
+}
+
 // ===== Upload and Process =====
 async function processFiles(folderIdOverride = null) {
     if (pendingFiles.length === 0) return;
@@ -688,20 +838,13 @@ async function processFiles(folderIdOverride = null) {
         const etaMessage = document.getElementById('eta-message');
         etaMessage.classList.remove('hidden');
 
-        const secondsPerPage = gpuToggle.checked ? SEC_PER_PAGE_GPU : SEC_PER_PAGE_CPU;
-        let estimatedSeconds = (totalPages * secondsPerPage) + STARTUP_OVERHEAD;
-
+        // No fabricated estimate up front - the worker reports measured throughput as
+        // soon as the first pages land, and the ETA comes from that.
         if (countdownInterval) clearInterval(countdownInterval);
-        etaMessage.textContent = `Estimated Time Remaining: ~${estimatedSeconds}s`;
+        etaState = { seconds: null, pagesDone: 0, totalPages };
+        etaMessage.textContent = 'Estimating time remaining…';
 
-        countdownInterval = setInterval(() => {
-            estimatedSeconds--;
-            if (estimatedSeconds > 0) {
-                etaMessage.textContent = `Estimated Time Remaining: ~${estimatedSeconds}s`;
-            } else {
-                etaMessage.textContent = `Almost done...`;
-            }
-        }, 1000);
+        countdownInterval = setInterval(tickEta, 1000);
 
         connectWebSocket(taskId);
     } catch (error) {
@@ -733,8 +876,17 @@ function connectWebSocket(taskId) {
         if (data.status === 'PROCESSING') {
             const completed = data.completed_files || 0;
             const total = data.total_files || pendingFiles.length;
-            loadingMessage.textContent = `Processing ${completed}/${total}...`;
-            if (total > 0) progressBar.style.width = `${Math.min((completed / total) * 100, 100)}%`;
+            loadingMessage.textContent = `Processing ${completed}/${total} file(s)...`;
+
+            // Page-level progress is far smoother than file-level: a single 74 page PDF
+            // would otherwise sit at 0% until the entire file finished.
+            if (data.total_pages) {
+                progressBar.style.width = `${Math.min((data.completed_pages / data.total_pages) * 100, 100)}%`;
+            } else if (total > 0) {
+                progressBar.style.width = `${Math.min((completed / total) * 100, 100)}%`;
+            }
+
+            updateEtaFromProgress(data);
 
             if (data.files_status) {
                 renderPerFileProgress(data.files_status);
@@ -749,7 +901,7 @@ function connectWebSocket(taskId) {
             loadingState.classList.add('hidden');
             successState.classList.remove('hidden');
             downloadBtn.href = `/api/v1/download/${taskId}?token=${token}`;
-            loadPreview(taskId);
+            wireReviewButton(taskId);
             loadFolders();
             loadHistory();
             loadDashboard();
@@ -793,7 +945,7 @@ function renderPerFileProgress(filesStatus) {
     for (const [filename, status] of Object.entries(filesStatus)) {
         let statusClass = 'queued';
         let statusText = 'Queued';
-        if (status === 'processing') { statusClass = 'processing'; statusText = 'Processing...'; }
+        if (status.startsWith('processing')) { statusClass = 'processing'; statusText = 'Processing...'; }
         else if (status === 'done') { statusClass = 'done'; statusText = 'Done'; }
         else if (status === 'failed') { statusClass = 'failed'; statusText = 'Failed'; }
 
@@ -805,90 +957,6 @@ function renderPerFileProgress(filesStatus) {
         `;
     }
     container.innerHTML = html;
-}
-
-async function loadPreview(taskId) {
-    try {
-        const response = await fetch(`/api/v1/compare/${taskId}`, { headers: getAuthHeaders() });
-        if (response.ok) {
-            const data = await response.json();
-            renderComparisonUI(taskId, data);
-            previewContainer.classList.remove('hidden');
-        }
-    } catch (err) {
-        console.error("Failed to load comparison preview", err);
-    }
-}
-
-function renderComparisonUI(taskId, filesData) {
-    let html = '';
-    Object.keys(filesData).forEach(filename => {
-        const pages = filesData[filename];
-        html += `
-            <div class="comparison-file-card">
-                <div class="comparison-header" onclick="this.nextElementSibling.classList.toggle('hidden')">
-                    <span class="comparison-title">📄 ${filename}</span>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                </div>
-                <div class="comparison-grid">
-        `;
-
-        pages.forEach(page => {
-            let rotationText = page.rotation === 0 ? 'No change' : `Rotated ${page.rotation}°`;
-            html += `
-                <div class="page-compare-card">
-                    <div class="page-compare-header">
-                        <span>Page ${page.page_num + 1}</span>
-                        <span class="rotation-badge">${rotationText}</span>
-                    </div>
-                    <div style="display:flex; gap:10px;">
-                        <div class="thumbnail-container">
-                            <span style="position:absolute; top:4px; left:4px; font-size:10px; background:rgba(0,0,0,0.5); color:white; padding:2px 4px; border-radius:2px; z-index:5;">Original</span>
-                            <img src="data:image/png;base64,${page.original_img}" class="compare-img">
-                        </div>
-                        <div class="thumbnail-container">
-                            <span style="position:absolute; top:4px; left:4px; font-size:10px; background:rgba(37,99,235,0.8); color:white; padding:2px 4px; border-radius:2px; z-index:5;">Corrected</span>
-                            <img id="corrected-img-${taskId}-${filename.replace(/[^a-zA-Z0-9]/g, '')}-${page.page_num}" src="data:image/png;base64,${page.corrected_img}" class="compare-img">
-                        </div>
-                    </div>
-                    <div class="override-actions">
-                        <button class="override-btn" onclick="overridePage('${taskId}', '${filename}', ${page.page_num}, 90)" title="Rotate CCW 90°">↺</button>
-                        <button class="override-btn" onclick="overridePage('${taskId}', '${filename}', ${page.page_num}, 270)" title="Rotate CW 90°">↻</button>
-                        <button class="override-btn" onclick="overridePage('${taskId}', '${filename}', ${page.page_num}, 180)" title="Rotate 180°">180°</button>
-                    </div>
-                </div>
-            `;
-        });
-
-        html += `</div></div>`;
-    });
-    previewContainer.innerHTML = html;
-}
-
-window.overridePage = async function (taskId, filename, pageNum, rotation) {
-    try {
-        const res = await fetch(`/api/v1/override/${taskId}`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ filename, page: pageNum, rotation })
-        });
-        if (res.ok) {
-            const data = await res.json();
-            const imgId = `corrected-img-${taskId}-${filename.replace(/[^a-zA-Z0-9]/g, '')}-${pageNum}`;
-            document.getElementById(imgId).src = `data:image/png;base64,${data.image}`;
-
-            // Show toast
-            const toast = document.createElement('div');
-            toast.textContent = 'Page rotated successfully';
-            toast.style.cssText = 'position:fixed; bottom:20px; right:20px; background:#10B981; color:white; padding:12px 20px; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1); z-index:1000; animation:fadein 0.3s, fadeout 0.3s 2.5s;';
-            document.body.appendChild(toast);
-            setTimeout(() => document.body.removeChild(toast), 3000);
-        } else {
-            alert("Failed to rotate page");
-        }
-    } catch (e) {
-        alert("Error overriding page rotation");
-    }
 }
 
 async function pollTaskStatus(taskId) {
@@ -905,7 +973,7 @@ async function pollTaskStatus(taskId) {
             loadingState.classList.add('hidden');
             successState.classList.remove('hidden');
             downloadBtn.href = `/api/v1/download/${taskId}?token=${token}`;
-            loadPreview(taskId);
+            wireReviewButton(taskId);
             loadFolders();
             loadHistory();
             loadDashboard();
@@ -926,6 +994,709 @@ async function pollTaskStatus(taskId) {
         showError(error.message);
     }
 }
+
+// ===== Review Queue =====
+// Shows only the pages the pipeline flagged as uncertain. Thumbnails are lazy-loaded
+// one page at a time so a 5,000-page job costs the same as a 5-page one to open.
+window.reviewState = { taskId: null, offset: 0, limit: 10, scope: 'flagged' };
+
+const REVIEW_REASONS = {
+    no_text: 'No readable text found at any rotation',
+    close_to_zero: 'Barely beat leaving the page unrotated',
+    ambiguous: "Two rotations scored almost the same",
+    error: 'Page failed to process',
+    blank: 'Page appears to be blank',
+    skewed: 'Page is tilted and may need straightening'
+};
+
+function reviewThumbUrl(taskId, filename, page, side) {
+    return `/api/v1/page-thumb/${taskId}/${page}?filename=${encodeURIComponent(filename)}&side=${side}&token=${token}`;
+}
+
+// Filenames are user-supplied, so they can't go into markup or inline handlers raw.
+function escapeHtml(value) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return String(value).replace(/[&<>"']/g, c => map[c]);
+}
+
+function jsArg(value) {
+    return encodeURIComponent(value).replace(/'/g, '%27');
+}
+
+function wireReviewButton(taskId) {
+    const btn = document.getElementById('review-btn');
+    if (btn) btn.onclick = () => openReview(taskId);
+}
+
+// ===== Bulk / pattern view =====
+// A 5,000 page job can flag thousands of pages. Reviewing those one at a time isn't a
+// workflow, so we collapse them into patterns and let one decision cover the group.
+const REVIEW_GROUPS_THRESHOLD = 20;
+
+window.reviewSetMode = function (mode) {
+    window.reviewState.mode = mode;
+    const groupsTab = document.getElementById('review-mode-groups');
+    const pagesTab = document.getElementById('review-mode-pages');
+    if (groupsTab) groupsTab.classList.toggle('active', mode === 'groups');
+    if (pagesTab) pagesTab.classList.toggle('active', mode === 'pages');
+
+    document.getElementById('review-groups').classList.toggle('hidden', mode !== 'groups');
+    document.querySelector('.review-body').classList.toggle('hidden', mode === 'groups');
+    document.getElementById('review-pager').classList.toggle('hidden', mode === 'groups');
+
+    if (mode === 'groups') loadReviewGroups();
+    else loadReview();
+};
+
+async function loadReviewGroups() {
+    const container = document.getElementById('review-groups');
+    container.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 20px;">Loading...</p>';
+
+    try {
+        const res = await fetch(`/api/v1/review/${window.reviewState.taskId}/groups`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            container.innerHTML = '<p style="color:#ef4444; text-align:center; padding:20px;">Could not load groups.</p>';
+            return;
+        }
+        renderReviewGroups(await res.json());
+    } catch (e) {
+        container.innerHTML = '<p style="color:#ef4444; text-align:center; padding:20px;">Error loading groups.</p>';
+    }
+}
+
+function renderReviewGroups(data) {
+    const container = document.getElementById('review-groups');
+    const taskId = window.reviewState.taskId;
+    const s = data.summary;
+
+    document.getElementById('review-subtitle').textContent =
+        `${s.total_pages} pages · ${s.needs_review} flagged · grouped into ${s.groups} pattern(s)`;
+
+    document.getElementById('review-summary').innerHTML = `
+        <div class="review-summary-stats">
+            <span class="review-stat flagged" data-remaining="${Math.max(s.needs_review - s.reviewed, 0)}">⚠ ${Math.max(s.needs_review - s.reviewed, 0)} need review</span>
+            <span class="review-stat ok">✓ ${s.auto_corrected} auto-corrected</span>
+        </div>
+        <div class="review-summary-actions">
+            <a href="/api/v1/text/${taskId}/download?token=${token}" class="btn-secondary" style="text-decoration:none;">⬇ Text (.txt)</a>
+            <a href="/api/v1/markdown/${taskId}/download?token=${token}" class="btn-secondary" style="text-decoration:none;">⬇ Markdown (.md)</a>
+            <a href="/api/v1/download/${taskId}?token=${token}" class="btn-primary" style="text-decoration:none;">⬇ Download final PDF</a>
+        </div>
+    `;
+
+    if (!data.groups.length) {
+        container.innerHTML = `
+            <div class="review-empty">
+                <h3>✓ Nothing needs review</h3>
+                <p>Every page was corrected with high confidence.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = data.groups.map(g => {
+        const done = g.reviewed >= g.count;
+        const samples = g.sample.map(sp => `
+            <figure class="review-group-sample">
+                <img loading="lazy" src="${reviewThumbUrl(taskId, sp.filename, sp.page, 'after')}"
+                     alt="${escapeHtml(sp.filename)} page ${sp.page + 1}">
+                <figcaption title="${escapeHtml(sp.filename)}">${escapeHtml(sp.filename)} · p${sp.page + 1}</figcaption>
+            </figure>
+        `).join('');
+
+        return `
+            <div class="review-group ${done ? 'done' : ''}">
+                <div class="review-group-head">
+                    <div>
+                        <h3>${done ? '✓' : '⚠'} ${escapeHtml(g.label)}</h3>
+                        <p class="review-group-meta">
+                            <strong>${g.count}</strong> page(s) across <strong>${g.files}</strong> file(s) ·
+                            ${g.angle === 0 ? 'left unrotated' : `corrected to ${g.angle}°`}
+                            ${g.reviewed ? ` · ${g.reviewed} already reviewed` : ''}
+                        </p>
+                        ${g.hint ? `<p class="review-group-hint">${escapeHtml(g.hint)}</p>` : ''}
+                    </div>
+                </div>
+
+                <div class="review-group-samples">${samples}</div>
+
+                <div class="review-group-actions">
+                    ${g.reason === 'skewed' ? `
+                        <span class="review-group-prompt">These are tilted:</span>
+                        <button type="button" class="btn-primary" onclick="reviewGroupAction('${escapeHtml(g.reason)}', ${g.angle}, 'deskew', 0, ${g.count})">
+                            ⟲ Straighten all ${g.count}
+                        </button>
+                        <span class="review-group-note">Re-renders these pages as images (larger file, text stays searchable)</span>
+                    ` : ''}
+                    <span class="review-group-prompt">If these samples look right:</span>
+                    <button type="button" class="btn-primary" onclick="reviewGroupAction('${escapeHtml(g.reason)}', ${g.angle}, 'accept', 0, ${g.count})">
+                        ✓ Accept all ${g.count}
+                    </button>
+                    <span class="review-group-prompt">If they're all turned the same way:</span>
+                    <button type="button" class="btn-secondary" onclick="reviewGroupAction('${escapeHtml(g.reason)}', ${g.angle}, 'rotate', 90, ${g.count})">↻ Rotate all 90°</button>
+                    <button type="button" class="btn-secondary" onclick="reviewGroupAction('${escapeHtml(g.reason)}', ${g.angle}, 'rotate', 180, ${g.count})">Rotate all 180°</button>
+                    <button type="button" class="btn-secondary" onclick="reviewGroupAction('${escapeHtml(g.reason)}', ${g.angle}, 'rotate', 270, ${g.count})">↺ Rotate all -90°</button>
+                    <button type="button" class="btn-secondary review-group-drill" onclick="reviewDrillIntoGroup('${escapeHtml(g.reason)}')">Review these individually →</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+window.reviewGroupAction = async function (reason, angle, action, rotateBy, count) {
+    const what = action === 'accept'
+        ? `Accept all ${count} page(s) as they are?`
+        : action === 'deskew'
+            ? `Straighten all ${count} tilted page(s)? They will be re-rendered as images - file size will grow, but the text stays searchable.`
+            : `Rotate all ${count} page(s) by ${rotateBy}°?`;
+    if (!await confirmDialog(action === 'accept' ? 'Accept pages' : 'Rotate pages', what, action === 'accept' ? 'Accept all' : 'Rotate all')) return;
+
+    try {
+        toast(action === 'deskew' ? 'Straightening pages…' : 'Applying…', 'info');
+        const res = await fetch(`/api/v1/review/${window.reviewState.taskId}/group-action`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ reason, angle, action, rotate_by: rotateBy })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            toast(err.detail || 'Group action failed');
+            return;
+        }
+        const data = await res.json();
+        toast(`Done — ${data.pages} page(s) across ${data.files} file(s) updated.`, 'success');
+        loadReviewGroups();
+    } catch (e) {
+        toast('Error applying group action');
+    }
+};
+
+window.reviewDrillIntoGroup = function (reason) {
+    const st = window.reviewState;
+    st.reason = reason;
+    st.file = null;
+    st.offset = 0;
+    reviewSetMode('pages');
+};
+
+window.openReview = async function (taskId) {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view-section').forEach(s => { s.classList.remove('active'); s.classList.add('hidden'); });
+    document.querySelectorAll('.sidebar-item').forEach(si => si.classList.remove('active'));
+    const view = document.getElementById('view-review');
+    view.classList.remove('hidden');
+    view.classList.add('active');
+
+    window.reviewState = {
+        taskId, offset: 0, limit: 10, scope: 'flagged',
+        file: null, reason: null, goto: null, gotoFile: null, mode: 'pages'
+    };
+
+    // Peek at the size first: small jobs go straight to page-by-page, bulk jobs open
+    // on the pattern view so nobody is handed 800 cards.
+    try {
+        const res = await fetch(`/api/v1/review/${taskId}?limit=1`, { headers: getAuthHeaders() });
+        if (res.ok) {
+            const peek = await res.json();
+            const modes = document.getElementById('review-modes');
+            if (peek.summary.needs_review >= REVIEW_GROUPS_THRESHOLD) {
+                if (modes) modes.classList.remove('hidden');
+                return reviewSetMode('groups');
+            }
+            if (modes) modes.classList.add('hidden');
+        }
+    } catch (e) { /* fall through to the page view */ }
+
+    reviewSetMode('pages');
+};
+
+async function loadReview() {
+    const st = window.reviewState;
+    const cards = document.getElementById('review-cards');
+    cards.innerHTML = '<p style="text-align:center; color: var(--text-light); padding: 20px;">Loading...</p>';
+
+    let url = `/api/v1/review/${st.taskId}?scope=${st.scope}&offset=${st.offset}&limit=${st.limit}`;
+    if (st.file) url += `&file=${encodeURIComponent(st.file)}`;
+    if (st.reason) url += `&reason=${encodeURIComponent(st.reason)}`;
+    if (st.goto) {
+        url += `&goto=${st.goto}`;
+        if (st.gotoFile) url += `&goto_file=${encodeURIComponent(st.gotoFile)}`;
+    }
+
+    try {
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            cards.innerHTML = `<p style="color:#ef4444; text-align:center; padding:20px;">${err.detail || 'Could not load review data.'}</p>`;
+            return;
+        }
+
+        const data = await res.json();
+
+        // On first open, land on the first file that actually needs attention so the
+        // user isn't staring at a file picker wondering where to start. Skipped when
+        // drilling in from a pattern group, where the point is to span all files.
+        if (!st.file && !st.reason && data.files.length > 1) {
+            const firstFlagged = data.files.find(f => f.needs_review > f.reviewed)
+                || data.files.find(f => f.needs_review > 0);
+            if (firstFlagged) {
+                st.file = firstFlagged.filename;
+                st.offset = 0;
+                return loadReview();
+            }
+        }
+
+        // A jump resolves to a real offset server-side; adopt it so Next/Previous
+        // continue from where we landed instead of from the old position.
+        st.offset = data.offset;
+        st.goto = null;
+        st.gotoFile = null;
+        renderReview(data);
+    } catch (e) {
+        cards.innerHTML = '<p style="color:#ef4444; text-align:center; padding:20px;">Error loading review data.</p>';
+    }
+}
+
+// Left rail: only files that actually need attention. Clean files collapse to one
+// line - with 32 uploads, 27 of them typically need nothing and shouldn't be scrolled past.
+function renderReviewRail(data, filesWithFlags, cleanFiles) {
+    const rail = document.getElementById('review-rail');
+    if (!rail) return;
+
+    // Single-file jobs don't need a file picker at all
+    if (data.files.length <= 1) {
+        rail.classList.add('hidden');
+        rail.innerHTML = '';
+        return;
+    }
+    rail.classList.remove('hidden');
+
+    const rows = filesWithFlags.map(f => {
+        const done = f.reviewed >= f.needs_review;
+        const active = f.filename === window.reviewState.file;
+        return `
+            <button type="button"
+                    class="review-rail-item ${active ? 'active' : ''} ${done ? 'done' : ''}"
+                    onclick="reviewSelectFile('${jsArg(f.filename)}')"
+                    title="${escapeHtml(f.filename)}"
+                    data-reviewed="${f.reviewed}" data-flagged="${f.needs_review}">
+                <span class="review-rail-name">${escapeHtml(f.filename)}</span>
+                <span class="review-rail-count">${done ? '✓' : `${f.reviewed}/${f.needs_review}`}</span>
+            </button>
+        `;
+    }).join('');
+
+    const cleanBlock = cleanFiles.length ? `
+        <div class="review-rail-clean">
+            <button type="button" class="review-rail-clean-toggle" onclick="toggleCleanFiles()">
+                ✓ ${cleanFiles.length} file(s) needed no review
+                <span id="review-clean-caret">▾</span>
+            </button>
+            <div id="review-clean-list" class="review-rail-clean-list hidden">
+                ${cleanFiles.map(f => `
+                    <button type="button" class="review-rail-item subtle ${f.filename === window.reviewState.file ? 'active' : ''}"
+                            onclick="reviewSelectFile('${jsArg(f.filename)}')" title="${escapeHtml(f.filename)}">
+                        <span class="review-rail-name">${escapeHtml(f.filename)}</span>
+                        <span class="review-rail-count">${f.total_pages}p</span>
+                    </button>
+                `).join('')}
+            </div>
+        </div>
+    ` : '';
+
+    rail.innerHTML = `
+        <div class="review-rail-head">Needs review</div>
+        ${rows || '<p class="review-rail-empty">Nothing flagged 🎉</p>'}
+        ${cleanBlock}
+    `;
+}
+
+// Text is fetched only when a panel is opened - loading it for every card would pull
+// the whole document's text just to render a list.
+window.togglePageText = async function (button, fileEnc, page) {
+    const panel = button.parentElement.querySelector('.review-text-body');
+    if (!panel) return;
+
+    if (!panel.classList.contains('hidden')) {
+        panel.classList.add('hidden');
+        button.textContent = button.textContent.replace('Hide', 'Show');
+        return;
+    }
+
+    if (!panel.dataset.loaded) {
+        panel.textContent = 'Loading…';
+        panel.classList.remove('hidden');
+        try {
+            const filename = decodeURIComponent(fileEnc);
+            const res = await fetch(
+                `/api/v1/text/${window.reviewState.taskId}?filename=${encodeURIComponent(filename)}&page=${page}`,
+                { headers: getAuthHeaders() }
+            );
+            if (!res.ok) throw new Error('failed');
+            const data = await res.json();
+            const body = (((data.files[0] || {}).pages || [])[0] || {}).text || '';
+            panel.textContent = body || '(no text recognised on this page)';
+            panel.dataset.loaded = '1';
+        } catch (e) {
+            panel.textContent = 'Could not load text for this page.';
+        }
+    } else {
+        panel.classList.remove('hidden');
+    }
+    button.textContent = button.textContent.replace('Show', 'Hide');
+};
+
+window.reviewClearReason = function () {
+    window.reviewState.reason = null;
+    window.reviewState.offset = 0;
+    loadReview();
+};
+
+window.reviewSelectFile = function (fileEnc) {
+    const st = window.reviewState;
+    st.file = decodeURIComponent(fileEnc);
+    st.offset = 0;
+    st.goto = null;
+    loadReview();
+};
+
+window.toggleCleanFiles = function () {
+    const list = document.getElementById('review-clean-list');
+    const caret = document.getElementById('review-clean-caret');
+    if (!list) return;
+    list.classList.toggle('hidden');
+    if (caret) caret.textContent = list.classList.contains('hidden') ? '▾' : '▴';
+};
+
+function renderReview(data) {
+    const { taskId } = window.reviewState;
+    const s = data.summary;
+    const remaining = Math.max(s.needs_review - s.reviewed, 0);
+
+    const activeFile = data.files.find(f => f.filename === window.reviewState.file) || null;
+    const filesWithFlags = data.files.filter(f => f.needs_review > 0);
+    const cleanFiles = data.files.filter(f => f.needs_review === 0);
+
+    document.getElementById('review-subtitle').textContent = data.files.length > 1
+        ? `${data.files.length} files · ${s.total_pages} pages · ${s.needs_review} flagged across ${filesWithFlags.length} file(s)`
+        : `${s.total_pages} page(s) processed · ${s.needs_review} flagged for review`;
+
+    renderReviewRail(data, filesWithFlags, cleanFiles);
+
+    // Drilled in from a pattern group - make the active filter visible and escapable
+    const filterBar = document.getElementById('review-filter-bar');
+    if (filterBar) {
+        if (window.reviewState.reason) {
+            filterBar.classList.remove('hidden');
+            filterBar.innerHTML = `
+                <span>Showing only: <strong>${escapeHtml(REVIEW_REASONS[window.reviewState.reason] || window.reviewState.reason)}</strong></span>
+                <button type="button" class="btn-secondary" onclick="reviewClearReason()">Clear filter</button>
+            `;
+        } else {
+            filterBar.classList.add('hidden');
+            filterBar.innerHTML = '';
+        }
+    }
+
+    // --- Summary bar ---
+    document.getElementById('review-summary').innerHTML = `
+        <div class="review-summary-stats">
+            <span class="review-stat flagged" data-remaining="${remaining}">⚠ ${remaining} need review</span>
+            <span class="review-stat ok">✓ ${s.auto_corrected} auto-corrected</span>
+        </div>
+        <div class="review-summary-actions">
+            ${remaining > 0 ? `<button class="btn-secondary" onclick="reviewBulk('accept_all')">Approve all</button>` : ''}
+            <a href="/api/v1/text/${taskId}/download?token=${token}" class="btn-secondary" style="text-decoration:none;">⬇ Text (.txt)</a>
+            <a href="/api/v1/markdown/${taskId}/download?token=${token}" class="btn-secondary" style="text-decoration:none;">⬇ Markdown (.md)</a>
+            <a href="/api/v1/download/${taskId}?token=${token}" class="btn-primary" style="text-decoration:none;">⬇ Download final PDF</a>
+        </div>
+    `;
+
+    // --- Every page was a guess: one bulk decision instead of hundreds of cards ---
+    // Scoped to the selected file, since one bad scan in a 32-file batch shouldn't
+    // offer to rotate the other 31.
+    const bulkPanel = document.getElementById('review-bulk-panel');
+    const bulkTarget = activeFile || (data.files.length === 1 ? data.files[0] : null);
+    if (bulkTarget && bulkTarget.all_low_confidence && bulkTarget.total_pages > 0) {
+        const scopeArg = data.files.length > 1 ? `'${jsArg(bulkTarget.filename)}'` : 'null';
+        bulkPanel.classList.remove('hidden');
+        bulkPanel.innerHTML = `
+            <h3>⚠ All ${bulkTarget.total_pages} pages of ${escapeHtml(bulkTarget.filename)} came back low confidence</h3>
+            <p>No readable text was detected at any rotation — this is usually an image-only scan.
+               Reviewing every page individually won't help. Pick one action for this document:</p>
+            <div class="review-bulk-actions">
+                <button type="button" class="btn-secondary" onclick="reviewBulk('accept_all', 0, ${scopeArg})">Leave all unchanged</button>
+                <button type="button" class="btn-secondary" onclick="reviewBulk('rotate_all', 90, ${scopeArg})">Rotate all 90°</button>
+                <button type="button" class="btn-secondary" onclick="reviewBulk('rotate_all', 180, ${scopeArg})">Rotate all 180°</button>
+                <button type="button" class="btn-secondary" onclick="reviewBulk('rotate_all', 270, ${scopeArg})">Rotate all 270°</button>
+            </div>
+        `;
+    } else {
+        bulkPanel.classList.add('hidden');
+        bulkPanel.innerHTML = '';
+    }
+
+    // --- Review cards ---
+    const cards = document.getElementById('review-cards');
+    if (data.pages.length === 0) {
+        cards.innerHTML = `
+            <div class="review-empty">
+                <h3>${data.scope === 'all' ? 'No pages to show' : '✓ Nothing needs review'}</h3>
+                <p>Every page was corrected with high confidence. You can download the result directly.</p>
+                <button class="btn-secondary" onclick="reviewSetScope('all')">Show all pages anyway</button>
+            </div>
+        `;
+    } else {
+        cards.innerHTML = data.pages.map(p => {
+            const key = escapeHtml(`${p.filename}::${p.page}`);
+            const safeName = escapeHtml(p.filename);
+            const argName = jsArg(p.filename);
+            const scores = Object.entries(p.scores || {})
+                .map(([angle, val]) => `<span class="review-score">${escapeHtml(angle)}°: ${escapeHtml(val)}</span>`)
+                .join('');
+            return `
+                <div class="review-card ${p.reviewed ? 'reviewed' : ''}" data-key="${key}">
+                    <div class="review-card-head">
+                        <div>
+                            <strong>${safeName}</strong> · Page ${p.page + 1}
+                            <div class="review-reason">${REVIEW_REASONS[p.reason] || (p.needs_review ? 'Uncertain' : 'High confidence')}</div>
+                        </div>
+                        <div class="review-card-badges">
+                            <span class="review-angle">detected ${p.angle}°</span>
+                            ${p.reviewed ? '<span class="review-done">✓ reviewed</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="review-compare">
+                        <figure class="review-pane">
+                            <figcaption><span class="review-pane-label before">Before</span> original upload</figcaption>
+                            <div class="review-img-frame">
+                                <img loading="lazy" src="${reviewThumbUrl(taskId, p.filename, p.page, 'before')}" alt="Page ${p.page + 1} before">
+                            </div>
+                        </figure>
+                        <div class="review-arrow" aria-hidden="true">→</div>
+                        <figure class="review-pane">
+                            <figcaption><span class="review-pane-label after">After</span> corrected ${p.angle === 0 ? '(unchanged)' : `(${p.angle}°)`}</figcaption>
+                            <div class="review-img-frame">
+                                <img loading="lazy" class="review-after-img" src="${reviewThumbUrl(taskId, p.filename, p.page, 'after')}" alt="Page ${p.page + 1} after">
+                            </div>
+                        </figure>
+                    </div>
+                    <div class="review-scores">${scores}</div>
+                    <div class="review-text">
+                        <button type="button" class="review-text-toggle" onclick="togglePageText(this, '${argName}', ${p.page})">
+                            📄 Show extracted text${p.word_count ? ` (${p.word_count} words)` : ''}
+                        </button>
+                        <pre class="review-text-body hidden"></pre>
+                    </div>
+                    <div class="review-actions">
+                        <button type="button" class="btn-primary" onclick="approveReviewPage('${argName}', ${p.page})">✓ Looks right</button>
+                        <button type="button" class="btn-secondary" onclick="rotateReviewPage('${argName}', ${p.page}, 90)">↻ Rotate 90°</button>
+                        <button type="button" class="btn-secondary" onclick="rotateReviewPage('${argName}', ${p.page}, 270)">↺ Rotate -90°</button>
+                        <button type="button" class="btn-secondary" onclick="rotateReviewPage('${argName}', ${p.page}, 180)">⤡ Rotate 180°</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // --- Pagination + jump to a specific page ---
+    const pager = document.getElementById('review-pager');
+    const shownTo = Math.min(data.offset + data.limit, data.total);
+
+    if (data.total === 0) {
+        pager.innerHTML = '';
+        return;
+    }
+
+    // The rail already scopes to a file, so the jump only needs a page number
+    const fileOptions = '';
+
+    const nav = data.total > data.limit
+        ? `<button type="button" class="btn-secondary" ${data.offset === 0 ? 'disabled' : ''} onclick="reviewPage(-1)">← Previous</button>
+           <span>${data.offset + 1}–${shownTo} of ${data.total}</span>
+           <button type="button" class="btn-secondary" ${shownTo >= data.total ? 'disabled' : ''} onclick="reviewPage(1)">Next →</button>`
+        : `<span>${data.total} page(s)</span>`;
+
+    pager.innerHTML = `
+        <div class="review-pager-nav">${nav}</div>
+        <div class="review-goto">
+            <label for="review-goto-input">Go to page</label>
+            ${fileOptions}
+            <input type="number" id="review-goto-input" class="form-input review-goto-input" min="1" placeholder="#">
+            <button type="button" class="btn-secondary" onclick="reviewGoto()">Go</button>
+            <span id="review-goto-msg" class="review-goto-msg"></span>
+        </div>
+    `;
+
+    // Enter should submit, not just the Go button
+    const input = document.getElementById('review-goto-input');
+    if (input) {
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); reviewGoto(); }
+        });
+    }
+
+    if (data.goto_found === false) {
+        const msg = document.getElementById('review-goto-msg');
+        if (msg) {
+            msg.textContent = window.reviewState.scope === 'flagged'
+                ? "That page isn't flagged for review."
+                : 'No such page in this job.';
+            msg.classList.add('miss');
+        }
+    }
+}
+
+window.reviewGoto = function () {
+    const input = document.getElementById('review-goto-input');
+    const msg = document.getElementById('review-goto-msg');
+    const fileSelect = document.getElementById('review-goto-file');
+    if (!input) return;
+
+    const value = parseInt(input.value, 10);
+    if (!value || value < 1) {
+        if (msg) { msg.textContent = 'Enter a page number.'; msg.classList.add('miss'); }
+        return;
+    }
+
+    window.reviewState.goto = value;
+    window.reviewState.gotoFile = fileSelect ? fileSelect.value : window.reviewState.file;
+    loadReview();
+};
+
+window.reviewPage = function (direction) {
+    const st = window.reviewState;
+    st.offset = Math.max(0, st.offset + direction * st.limit);
+    loadReview();
+};
+
+window.reviewSetScope = function (scope) {
+    window.reviewState.scope = scope;
+    window.reviewState.offset = 0;
+    loadReview();
+};
+
+// Actions update their own card in place. Re-rendering the whole list would reset
+// the scroll position, and the thumbnail URL is cached so a reload wouldn't even
+// show the new rotation.
+function reviewCardFor(filename, page) {
+    // Inside a quoted attribute selector only backslashes and quotes need escaping -
+    // CSS.escape would mangle spaces and dots and never match.
+    const key = `${filename}::${page}`.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return document.querySelector(`.review-card[data-key="${key}"]`);
+}
+
+function markCardReviewed(card) {
+    if (!card || card.classList.contains('reviewed')) return;
+    card.classList.add('reviewed');
+
+    const badges = card.querySelector('.review-card-badges');
+    if (badges && !badges.querySelector('.review-done')) {
+        const badge = document.createElement('span');
+        badge.className = 'review-done';
+        badge.textContent = '✓ reviewed';
+        badges.appendChild(badge);
+    }
+
+    // Keep the header count honest without refetching
+    const stat = document.querySelector('.review-stat.flagged');
+    if (stat) {
+        const remaining = Math.max((parseInt(stat.dataset.remaining || '0', 10)) - 1, 0);
+        stat.dataset.remaining = remaining;
+        stat.textContent = `⚠ ${remaining} need review`;
+    }
+
+    // ...and the selected file's progress in the rail
+    const railItem = document.querySelector('.review-rail-item.active');
+    if (railItem) {
+        const flagged = parseInt(railItem.dataset.flagged || '0', 10);
+        const done = Math.min(parseInt(railItem.dataset.reviewed || '0', 10) + 1, flagged);
+        railItem.dataset.reviewed = done;
+        const count = railItem.querySelector('.review-rail-count');
+        if (count) count.textContent = done >= flagged ? '✓' : `${done}/${flagged}`;
+        if (done >= flagged) railItem.classList.add('done');
+    }
+}
+
+async function withBusyButtons(card, fn) {
+    const buttons = card ? card.querySelectorAll('.review-actions button') : [];
+    buttons.forEach(b => { b.disabled = true; });
+    try {
+        await fn();
+    } finally {
+        buttons.forEach(b => { b.disabled = false; });
+    }
+}
+
+window.approveReviewPage = async function (filenameEnc, page) {
+    const filename = decodeURIComponent(filenameEnc);
+    const card = reviewCardFor(filename, page);
+
+    await withBusyButtons(card, async () => {
+        try {
+            const res = await fetch(`/api/v1/review/${window.reviewState.taskId}/approve`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ filename, page })
+            });
+            if (res.ok) markCardReviewed(card);
+            else toast('Failed to approve page');
+        } catch (e) { toast('Error approving page'); }
+    });
+};
+
+window.rotateReviewPage = async function (filenameEnc, page, rotation) {
+    const filename = decodeURIComponent(filenameEnc);
+    const card = reviewCardFor(filename, page);
+
+    await withBusyButtons(card, async () => {
+        try {
+            const res = await fetch(`/api/v1/override/${window.reviewState.taskId}`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ filename, page, rotation })
+            });
+            if (!res.ok) {
+                toast('Failed to rotate page');
+                return;
+            }
+
+            // The endpoint hands back the freshly rendered page - use it directly so we
+            // don't fight the thumbnail cache.
+            const data = await res.json();
+            const img = card && card.querySelector('.review-after-img');
+            if (img && data.image) img.src = `data:image/png;base64,${data.image}`;
+
+            const angleBadge = card && card.querySelector('.review-angle');
+            if (angleBadge) angleBadge.textContent = 'adjusted manually';
+
+            markCardReviewed(card);
+        } catch (e) { toast('Error rotating page'); }
+    });
+};
+
+window.reviewBulk = async function (action, angle = 0, fileEnc = null) {
+    const filename = fileEnc ? decodeURIComponent(fileEnc) : null;
+    const target = filename ? `"${filename}"` : 'this job';
+    const label = action === 'accept_all'
+        ? `accept every flagged page in ${target} as-is`
+        : `rotate every page in ${target} by ${angle}°`;
+    if (!await confirmDialog('Apply to all pages', `This will ${label}.`, 'Apply')) return;
+    try {
+        const res = await fetch(`/api/v1/review/${window.reviewState.taskId}/bulk`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(filename ? { action, angle, filename } : { action, angle })
+        });
+        if (res.ok) {
+            window.reviewState.offset = 0;
+            loadReview();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            toast(err.detail || 'Bulk action failed');
+        }
+    } catch (e) { toast('Error applying bulk action'); }
+};
 
 async function loadHistory() {
     const historyList = document.getElementById('history-list');
@@ -964,7 +1735,8 @@ async function loadHistory() {
                     options += `<option value="${f.id}" ${f.id == job.folder_id ? 'selected' : ''}>${f.name}</option>`;
                 });
                 let moveSelect = `<select class="form-input" onchange="moveJobToFolder('${job.task_id}', this.value)" style="padding:4px; font-size:11px; margin-left:8px; width:auto; display:inline-block;">${options}</select>`;
-                actionHtml = `<a href="/api/v1/download/${job.task_id}?token=${token}" class="btn-primary" style="padding: 6px 14px; text-decoration: none; font-size: 12px;">Download</a>${moveSelect}`;
+                let reviewBtn = `<button class="btn-secondary" onclick="openReview('${job.task_id}')" style="padding: 6px 14px; font-size: 12px; margin-right: 8px;">Review</button>`;
+                actionHtml = `${reviewBtn}<a href="/api/v1/download/${job.task_id}?token=${token}" class="btn-primary" style="padding: 6px 14px; text-decoration: none; font-size: 12px;">Download</a>${moveSelect}`;
             } else if (job.status === 'FAILED') {
                 actionHtml = `<span style="font-size: 12px; color: #DC2626;" title="${job.error_message || ''}">Error</span>`;
             } else {
@@ -1046,7 +1818,6 @@ function resetUI() {
     errorState.classList.add('hidden');
     loadingState.classList.add('hidden');
     selectedState.classList.add('hidden');
-    previewContainer.classList.add('hidden');
     dropZone.classList.remove('hidden');
     fileInput.value = "";
 
@@ -1116,7 +1887,7 @@ async function loadDashboard() {
 // --- NEW FOLDER FEATURES ---
 
 async function renameFolder(id, currentName) {
-    const newName = prompt("Enter new folder name:", currentName);
+    const newName = await promptDialog('Rename folder', 'Enter a new name for this folder.', currentName, 'Rename');
     if (!newName || newName === currentName) return;
     try {
         const res = await fetch(`/api/v1/folders/${id}`, {
@@ -1127,7 +1898,7 @@ async function renameFolder(id, currentName) {
         if (res.ok) {
             loadFolders();
             document.getElementById('folder-detail-name').innerHTML = `${newName} <button class="icon-btn" onclick="renameFolder(${id}, '${newName}')" title="Rename Folder" style="background:none; border:none; color:var(--text-light); cursor:pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
-        } else alert("Failed to rename");
+        } else toast("Failed to rename");
     } catch (e) { console.error(e); }
 }
 
@@ -1141,12 +1912,12 @@ async function moveJobToFolder(taskId, folderId) {
         if (res.ok) {
             loadHistory();
             loadFolders();
-        } else alert("Failed to move job");
+        } else toast("Failed to move job");
     } catch (e) { console.error(e); }
 }
 
 function uploadToFolder(event) {
-    if (!window.currentViewFolderId) return;
+    if (!window.currentViewFolderId && !window.viewingUnfiled) return;
     pendingFiles = Array.from(event.target.files);
     if (pendingFiles.length === 0) return;
 
@@ -1167,7 +1938,7 @@ function downloadAllFromFolder() {
 
 async function mergeFolderPdfs() {
     if (!window.currentViewFolderId) return;
-    alert("Merging PDFs... this might take a moment. Check the folder in a few seconds.");
+    toast("Merging PDFs... this might take a moment.", 'info');
     try {
         const res = await fetch(`/api/v1/folders/${window.currentViewFolderId}/merge`, {
             method: 'POST',
@@ -1177,7 +1948,7 @@ async function mergeFolderPdfs() {
             loadFolderFiles(window.currentViewFolderId, document.getElementById('folder-detail-name').innerText.trim());
         } else {
             const err = await res.json();
-            alert(err.detail || "Failed to merge");
+            toast(err.detail || "Failed to merge");
         }
     } catch (e) { console.error(e); }
 }
@@ -1294,7 +2065,7 @@ window.downloadSelectedHistoryJobs = downloadSelectedHistoryJobs;
 
 function downloadAllFolders() {
     if (!window.userFolders || window.userFolders.length === 0) {
-        alert("No folders to download.");
+        toast("No folders to download.", 'info');
         return;
     }
     const folderIds = window.userFolders.map(f => f.id).join(',');
@@ -1315,6 +2086,15 @@ function updateSelectedFoldersCount() {
             downloadBtn.textContent = `⬇️ Download Selected (${count})`;
         }
     }
+
+    const deleteBtn = document.getElementById('delete-selected-folders-btn');
+    if (deleteBtn) {
+        deleteBtn.style.display = count > 0 ? 'inline-block' : 'none';
+        if (count > 0) {
+            deleteBtn.textContent = `🗑️ Delete Selected (${count})`;
+        }
+    }
+
     if (selectAllCb) {
         selectAllCb.checked = (allCheckboxes.length > 0 && count === allCheckboxes.length);
     }
@@ -1327,6 +2107,38 @@ function toggleSelectAllFolders(checked) {
     updateSelectedFoldersCount();
 }
 window.toggleSelectAllFolders = toggleSelectAllFolders;
+
+async function deleteSelectedFolders() {
+    const selected = Array.from(document.querySelectorAll('.folder-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+    if (selected.length === 0) return;
+
+    if (!await confirmDialog('Delete folders', `${selected.length} folder(s) and their file records will be deleted. The processed PDFs themselves are not removed.`, `Delete ${selected.length} folder(s)`)) return;
+
+    try {
+        const res = await fetch('/api/v1/folders/delete-batch', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ folder_ids: selected })
+        });
+        if (res.ok) {
+            const selectAllCb = document.getElementById('select-all-folders');
+            if (selectAllCb) selectAllCb.checked = false;
+
+            // loadFolders() rebuilds the grid (and its checkboxes), so the count has to
+            // be recalculated AFTER it finishes - otherwise it counts the stale, still
+            // ticked boxes and the button keeps showing the old selection.
+            await loadFolders();
+            updateSelectedFoldersCount();
+            showFoldersList();
+            loadDashboard();
+        } else {
+            toast('Failed to delete folders');
+        }
+    } catch (e) {
+        toast('Error deleting folders');
+    }
+}
+window.deleteSelectedFolders = deleteSelectedFolders;
 
 function downloadSelectedFolders() {
     const checked = Array.from(document.querySelectorAll('.folder-checkbox:checked')).map(cb => cb.value);
