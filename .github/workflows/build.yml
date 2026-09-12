@@ -3,8 +3,24 @@ name: Continuous Integration
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - '**.py'
+      - '**.html'
+      - '**.js'
+      - '**.css'
+      - 'Dockerfile.*'
+      - 'requirements*.txt'
+      - '.github/workflows/**'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - '**.py'
+      - '**.html'
+      - '**.js'
+      - '**.css'
+      - 'Dockerfile.*'
+      - 'requirements*.txt'
+      - '.github/workflows/**'
 
 jobs:
   lint:
