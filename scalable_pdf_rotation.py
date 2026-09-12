@@ -7,6 +7,7 @@ import sys
 import logging
 import json
 import time
+import subprocess
 import cv2
 import numpy as np
 from collections import Counter
@@ -167,7 +168,73 @@ def analyze_page_rotation(pdf_path, page_num):
         logger.error(f"Error processing page {page_num}: {e}")  
         return page_num, 0, "error"
 
-def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=1500, num_workers=1, progress_callback=None):
+def _analyze_page_wrapper(args):
+    """Wrapper to allow unpacking tuple arguments for multiprocessing.Pool and return pdf_path"""
+    pdf_path, page_num = args
+    page_num, angle, method = analyze_page_rotation(pdf_path, page_num)
+    return pdf_path, page_num, angle, method
+
+def _save_completed_pdf(input_pdf, output_pdf, page_rotations):
+    """Helper to apply rotations and save a fully completed PDF."""
+    try:
+        logger.info(f"Applying corrections and saving to {output_pdf}...")
+        doc = fitz.open(input_pdf)
+        summary = Counter()
+        
+        for page_num in range(doc.page_count):
+            page = doc.load_page(page_num)
+            detected_angle, method = page_rotations.get(page_num, (0, "default"))
+            summary[f"{detected_angle}_degrees_via_{method}"] += 1
+            
+            if detected_angle != 0:
+                current_metadata_rot = page.rotation
+                if method == "metadata":
+                    page.set_rotation(0)
+                else:
+                    new_rotation = (current_metadata_rot - detected_angle) % 360
+                    page.set_rotation(new_rotation)
+                    
+        os.makedirs(os.path.dirname(output_pdf), exist_ok=True)
+        doc.save(output_pdf)
+        doc.close()
+        
+        for k, v in summary.items():
+            logger.info(f"  {os.path.basename(input_pdf)} - {k}: {v} pages")
+            
+    except Exception as e:
+        logger.error(f"Failed to save {output_pdf}: {e}")
+
+def _get_gpu_memory_mb():
+    """Total VRAM (MB) of GPU 0, via nvidia-smi. Returns None if it can't be determined."""
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            timeout=5,
+        )
+        return int(output.decode().strip().splitlines()[0])
+    except Exception:
+        return None
+
+
+def _cap_gpu_workers(requested_workers, gpu_mem_per_worker):
+    """
+    Each worker process loads its own PaddleOCR models and reserves a gpu_mem-sized
+    CUDA memory pool independently (see init_worker). Requesting more workers than
+    the card can actually hold doesn't fail cleanly - it oversubscribes the GPU and
+    causes hangs / fatal CUDA aborts (observed in practice on a 4GB laptop GPU with
+    num_workers=6-10). Reserve 25% of VRAM as headroom for model weights, driver
+    overhead, and anything else already using the card.
+    """
+    total_mem = _get_gpu_memory_mb()
+    if not total_mem or gpu_mem_per_worker <= 0:
+        return requested_workers  # Can't introspect the GPU; trust the caller.
+
+    safe_budget = total_mem * 0.75
+    max_workers = max(1, int(safe_budget // gpu_mem_per_worker))
+    return min(requested_workers, max_workers)
+
+
+def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=1500, num_workers=6, progress_callback=None):
     if not os.path.exists(input_folder):
         logger.error(f"Cannot find input folder: {input_folder}")
         return {"error": f"Input folder {input_folder} does not exist", "status": "failed"}
@@ -194,88 +261,106 @@ def run_rotation_pipeline(input_folder, output_folder, use_gpu=True, gpu_mem=150
         return {"error": "No PDFs found", "status": "completed", "files_processed": 0}
         
     overall_start_time = time.time()
-    total_pages_processed = 0
-    all_page_rotations = {}
-    files_status = {os.path.basename(f): "queued" for f in pdf_files}
     
-    logger.info("Phase 1: Detecting visual orientations in parallel...")
-    with ProcessPoolExecutor(max_workers=num_workers, initializer=init_worker, initargs=(use_gpu, gpu_mem)) as executor:
-        for file_idx, input_pdf in enumerate(pdf_files):
-            filename = os.path.basename(input_pdf)
-            files_status[filename] = "processing"
-            if progress_callback:
-                progress_callback(file_idx, len(pdf_files), filename, files_status)
-                
-            rel_path = os.path.relpath(input_pdf, input_folder)
-            output_pdf = os.path.join(output_folder, rel_path)
-            os.makedirs(os.path.dirname(output_pdf), exist_ok=True)
-            
-            logger.info(f"Processing: {input_pdf}")
-            try:
-                doc = fitz.open(input_pdf)
-                total_pages = doc.page_count
-                doc.close()
-            except Exception as e:
-                logger.error(f"Failed to open {input_pdf}: {e}")
-                files_status[filename] = "failed"
-                if progress_callback:
-                    progress_callback(file_idx + 1, len(pdf_files), filename, files_status)
-                continue
-                
-            total_pages_processed += total_pages
-            page_rotations = {}
-            
-            futures = {executor.submit(analyze_page_rotation, input_pdf, p): p for p in range(total_pages)}
-            for future in as_completed(futures):
-                try:
-                    page_num, angle, method = future.result()
-                    page_rotations[page_num] = (angle, method)
-                except Exception as e:
-                    logger.error(f"A worker failed on {input_pdf}: {e}")
-
-            logger.info(f"Applying corrections and saving to {output_pdf}...")
+    # Phase 1: Discover all PDFs and flatten into a global page task pool
+    logger.info("Phase 1: Discovering pages across all PDFs...")
+    tasks = []
+    pdf_tracker = {}
+    total_pages_found = 0
+    
+    for file_idx, input_pdf in enumerate(pdf_files):
+        filename = os.path.basename(input_pdf)
+        try:
             doc = fitz.open(input_pdf)
-            summary = Counter()
-            all_page_rotations[filename] = {}
-            
-            for page_num in range(total_pages):
-                page = doc.load_page(page_num)
-                detected_angle, method = page_rotations.get(page_num, (0, "default"))
-                summary[f"{detected_angle}_degrees_via_{method}"] += 1
-                
-                # Record what the AI decided
-                all_page_rotations[filename][page_num] = detected_angle
-                
-                if detected_angle != 0:
-                    current_metadata_rot = page.rotation
-                    if method == "metadata":
-                        page.set_rotation(0)
-                    else:
-                        new_rotation = (current_metadata_rot - detected_angle) % 360
-                        page.set_rotation(new_rotation)
-                        
-            doc.save(output_pdf)
+            total_pages = doc.page_count
             doc.close()
             
-            for k, v in summary.items():
-                logger.info(f"  {k}: {v} pages")
+            pdf_tracker[input_pdf] = {
+                "total_pages": total_pages,
+                "completed_pages": 0,
+                "rotations": {},
+                "file_idx": file_idx
+            }
+            total_pages_found += total_pages
+            
+            for p in range(total_pages):
+                tasks.append((input_pdf, p))
                 
-            files_status[filename] = "done"
+        except Exception as e:
+            logger.error(f"Failed to open {input_pdf}: {e}")
             if progress_callback:
-                progress_callback(file_idx + 1, len(pdf_files), filename, files_status)
+                progress_callback(file_idx + 1, len(pdf_files), filename, {"status": "failed"})
+
+    logger.info(f"Found {len(pdf_files)} PDFs with a total of {total_pages_found} pages.")
+
+    # Don't spin up more worker processes than there are pages to process.
+    num_workers = max(1, min(num_workers, len(tasks)))
+
+    if use_gpu:
+        capped_workers = _cap_gpu_workers(num_workers, gpu_mem)
+        if capped_workers < num_workers:
+            logger.warning(
+                f"Requested {num_workers} GPU workers, but only ~{capped_workers} fit in "
+                f"available VRAM at {gpu_mem}MB/worker. Capping to {capped_workers} to avoid "
+                f"GPU out-of-memory hangs/crashes."
+            )
+        num_workers = capped_workers
+
+    logger.info(f"Phase 2: Processing global pool of pages asynchronously with {num_workers} worker(s)...")
+
+    files_status = {os.path.basename(f): "queued" for f in pdf_files}
+    all_page_rotations = {}
+    completed_files = 0
+
+    # Phase 2: Process pages as fast as possible in parallel
+    with multiprocessing.Pool(processes=num_workers, initializer=init_worker, initargs=(use_gpu, gpu_mem)) as pool:
+        # imap_unordered pulls tasks dynamically and returns results as soon as they finish
+        for result in pool.imap_unordered(_analyze_page_wrapper, tasks):
+            pdf_path, page_num, angle, method = result
+            
+            tracker = pdf_tracker[pdf_path]
+            tracker["rotations"][page_num] = (angle, method)
+            tracker["completed_pages"] += 1
+            
+            filename = os.path.basename(pdf_path)
+            files_status[filename] = f"processing ({tracker['completed_pages']}/{tracker['total_pages']})"
+            
+            if progress_callback:
+                # Provide real-time UI updates
+                progress_callback(completed_files, len(pdf_files), filename, files_status)
+                
+            # TRIGGER ASYNC SAVE: Is this PDF fully complete?
+            if tracker["completed_pages"] == tracker["total_pages"]:
+                rel_path = os.path.relpath(pdf_path, input_folder)
+                output_pdf = os.path.join(output_folder, rel_path)
+                
+                # Apply rotations and save to disk
+                _save_completed_pdf(pdf_path, output_pdf, tracker["rotations"])
+                
+                # Record final angles for the final return dictionary
+                all_page_rotations[filename] = {p: rot[0] for p, rot in tracker["rotations"].items()}
+                
+                # Cleanup tracker to instantly free memory
+                del pdf_tracker[pdf_path]
+                
+                completed_files += 1
+                files_status[filename] = "done"
+                
+                if progress_callback:
+                    progress_callback(completed_files, len(pdf_files), filename, files_status)
     
     overall_end_time = time.time()
     total_time = overall_end_time - overall_start_time
     logger.info("======= FINAL ROTATION SUMMARY ==========")
-    logger.info(f"Total PDFs processed: {len(pdf_files)}")
-    logger.info(f"Total Pages processed: {total_pages_processed}")
+    logger.info(f"Total PDFs processed: {completed_files}")
+    logger.info(f"Total Pages processed: {total_pages_found}")
     logger.info(f"Total processing time: {total_time:.2f} seconds")
     logger.info("=========================================")
     
     return {
         "status": "completed",
-        "files_processed": len(pdf_files),
-        "pages_processed": total_pages_processed,
+        "files_processed": completed_files,
+        "pages_processed": total_pages_found,
         "time_seconds": total_time,
         "page_rotations": all_page_rotations
     }

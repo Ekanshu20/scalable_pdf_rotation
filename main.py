@@ -515,7 +515,7 @@ async def start_rotation(
     output_folder: str = Form(...),
     use_gpu: bool = Form(True),
     gpu_mem: int = Form(1500),
-    num_workers: int = Form(1)
+    num_workers: int = Form(10)
 ):
     """
     Legacy endpoint for submitting a PDF rotation job via server paths.
@@ -540,7 +540,7 @@ async def handle_upload(
     request: Request,
     files: List[UploadFile] = File(...),
     use_gpu: bool = Form(True),
-    num_workers: int = Form(2),
+    num_workers: int = Form(6),
     folder_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
