@@ -1,7 +1,10 @@
 # Environments
 venv/
 env/
+# Secrets: only the template is committed
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -15,8 +18,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to the repo root: an unanchored lib/ also ignored frontend/src/lib
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -36,12 +40,21 @@ MANIFEST
 
 # App Data
 tmp/
-jobs.db
+*.db
 
-# Models & Test Data
+# Models & Test Data (samples/ and tools/ keep their folders, not their contents)
 paddleocr_models/
+samples/*
+!samples/README.md
+tools/*
+!tools/README.md
 
 # Executables
 *.exe
 
 *.pdf
+
+# Frontend (React/Vite) - dependencies and build output are never committed;
+# CI and docker/api.Dockerfile install and build them.
+frontend/node_modules/
+*.tsbuildinfo

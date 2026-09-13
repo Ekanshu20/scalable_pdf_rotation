@@ -4,22 +4,20 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - '**.py'
-      - '**.html'
-      - '**.js'
-      - '**.css'
-      - 'Dockerfile.*'
-      - 'requirements*.txt'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'docker/**'
+      - 'docker-compose.yml'
+      - '.dockerignore'
       - '.github/workflows/**'
   pull_request:
     branches: [ "main" ]
     paths:
-      - '**.py'
-      - '**.html'
-      - '**.js'
-      - '**.css'
-      - 'Dockerfile.*'
-      - 'requirements*.txt'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'docker/**'
+      - 'docker-compose.yml'
+      - '.dockerignore'
       - '.github/workflows/**'
 
 jobs:
@@ -39,12 +37,47 @@ jobs:
           python -m pip install --upgrade pip
           pip install flake8
           # Stop the build if there are Python syntax errors or undefined names
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 backend --count --select=E9,F63,F7,F82 --show-source --statistics
           # exit-zero treats all other errors as warnings
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          flake8 backend --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  # Type-check and build the React app on its own first: a TypeScript error fails
+  # here in about a minute instead of deep inside the Docker build.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify bundle output
+        working-directory: backend/static/dist
+        run: |
+          test -f index.html
+          ls assets/*.js assets/*.css
+          # Assets must resolve under the path FastAPI mounts
+          grep -q '/static/dist/assets/' index.html
 
   build-api:
-    needs: lint
+    needs: [lint, frontend]
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
@@ -53,15 +86,52 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # docker/api.Dockerfile builds the frontend in a Node stage; the runtime image stays Python-only.
       - name: Build API Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.api
+          file: ./docker/api.Dockerfile
           push: false
-          tags: scalable-pdf-api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
+          tags: scalable-pdf-api:ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      # Proves the bundle actually made it into the image and that client-side
+      # routes (deep links like /dashboard/review/<id>) return the app shell.
+      # Fail closed: the image must refuse to start without a real secret.
+      - name: API refuses to start without SECRET_KEY
+        run: |
+          if docker run --rm scalable-pdf-api:ci python -c "import app.main"; then
+            echo "FAIL: API started without SECRET_KEY"; exit 1
+          fi
+          if docker run --rm -e SECRET_KEY=your-super-secret-key-change-in-production scalable-pdf-api:ci python -c "import app.main"; then
+            echo "FAIL: API accepted the old leaked placeholder key"; exit 1
+          fi
+          echo "ok  startup rejected missing and placeholder keys"
+
+      - name: Smoke test dashboard
+        run: |
+          # Throwaway per-run secret; real keys are injected at deploy time, never baked into images.
+          docker run -d --name api-smoke -p 8000:8000 -e SECRET_KEY="$(openssl rand -base64 48)" scalable-pdf-api:ci
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/ > /dev/null && break
+            sleep 2
+          done
+          for path in /dashboard /dashboard/review/ci-check /dashboard/folders/1; do
+            body=$(curl -sf "http://localhost:8000$path")
+            echo "$body" | grep -q '/static/dist/assets/' || { echo "FAIL: $path did not serve the React app"; exit 1; }
+            echo "ok  $path"
+          done
+          asset=$(curl -sf http://localhost:8000/dashboard | grep -o '/static/dist/assets/[^"]*\.js' | head -1)
+          curl -sf -o /dev/null "http://localhost:8000$asset" && echo "ok  $asset"
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/folders)
+          [ "$status" = "401" ] && echo "ok  API auth enforced" || { echo "FAIL: /api/v1/folders returned $status"; exit 1; }
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs api-smoke || true
 
   build-worker:
     needs: lint
@@ -77,8 +147,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.worker
+          file: ./docker/worker.Dockerfile
           push: false
           tags: scalable-pdf-worker:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker

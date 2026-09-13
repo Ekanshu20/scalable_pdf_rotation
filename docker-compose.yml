@@ -7,23 +7,29 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: docker/api.Dockerfile
     ports:
       - "8000:8000"
     environment:
       - REDIS_URL=redis://redis:6379/0
+      # Read from .env (gitignored). Only the API gets it; the worker never needs it.
+      # Compose refuses to start if it's unset.
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is not set - copy .env.example to .env and generate one}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-10080}
     depends_on:
       - redis
     volumes:
       # Shared volume so the API can pass uploaded files to the worker
       - shared_tmp:/app/tmp
-      # Mount codebase for automatic hot-reloading
-      - .:/app
+      # Mount the backend for hot-reloading. Run `npm run build` in frontend/
+      # to refresh backend/static/dist, which this mount then serves.
+      - ./backend:/app
 
   worker:
     build:
       context: .
-      dockerfile: Dockerfile.worker
+      dockerfile: docker/worker.Dockerfile
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:
@@ -47,8 +53,8 @@ services:
   celery-beat:
     build:
       context: .
-      dockerfile: Dockerfile.worker
-    command: celery -A worker.app beat --loglevel=info
+      dockerfile: docker/worker.Dockerfile
+    command: celery -A app.worker beat --loglevel=info
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:

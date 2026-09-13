@@ -12,11 +12,19 @@ permissions:
 
 jobs:
   push-api:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only publish after CI passed for a push to main. workflow_run also fires for
+    # pull requests, which must never overwrite the :latest image.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
+      # Build the exact commit CI verified, not whatever main points to now.
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -27,23 +35,32 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
+      # The React frontend is compiled inside docker/api.Dockerfile (Node build stage),
+      # so the pushed image already contains static/dist.
       - name: Build and Push API Image to GHCR
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.api
+          file: ./docker/api.Dockerfile
           push: true
-          tags: ghcr.io/ekanshu20/scalable-pdf-api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/ekanshu20/scalable-pdf-api:latest
+            ghcr.io/ekanshu20/scalable-pdf-api:${{ github.event.workflow_run.head_sha }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
 
   push-worker:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,13 +71,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Build and Push Worker Image to GHCR
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.worker
+          file: ./docker/worker.Dockerfile
           push: true
-          tags: ghcr.io/ekanshu20/scalable-pdf-worker:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/ekanshu20/scalable-pdf-worker:latest
+            ghcr.io/ekanshu20/scalable-pdf-worker:${{ github.event.workflow_run.head_sha }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker

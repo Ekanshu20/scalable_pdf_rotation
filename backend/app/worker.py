@@ -1,8 +1,9 @@
 import os
 import sys
 
-# Ensure the current directory is in the Python path for Celery workers
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# Put backend/ (the parent of the `app` package) on the path so Celery and the
+# spawned OCR child processes can import `app.*` regardless of working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from celery import Celery
 from celery.schedules import crontab
@@ -31,7 +32,7 @@ def process_pdf_rotation(self, input_folder: str, output_folder: str, use_gpu: b
     Celery task that triggers the PDF rotation pipeline.
     """
     # Import inside the task so the lightweight API container doesn't try to load heavy ML libraries like cv2
-    from scalable_pdf_rotation import run_rotation_pipeline
+    from app.pipeline.rotation import run_rotation_pipeline
 
     # Mark state as processing
     self.update_state(state='PROCESSING', meta={'status': 'Starting rotation pipeline...', 'completed_files': 0, 'total_files': 0})
@@ -97,9 +98,9 @@ def process_pdf_rotation(self, input_folder: str, output_folder: str, use_gpu: b
 @app.task(name="cleanup_old_files")
 def cleanup_old_files():
     """
-    Deletes folders in /app/tmp that are older than 24 hours.
+    Deletes folders in the shared tmp dir that are older than 24 hours.
     """
-    tmp_dir = "/app/tmp"
+    tmp_dir = os.getenv("TMP_DIR", "/app/tmp")
     if not os.path.exists(tmp_dir):
         return
         

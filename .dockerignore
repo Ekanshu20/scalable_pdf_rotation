@@ -1,6 +1,23 @@
-venv
-__pycache__
-*.pyc
-*.pyo
+# Build context is the repository root; keep it small and keep local data out of images.
 .git
+.github
+**/__pycache__
+**/*.py[cod]
+venv
 .env
+.env.*
+*.tsbuildinfo
+
+# Rebuilt inside docker/api.Dockerfile
+frontend/node_modules
+backend/static/dist
+
+# Local-only data, tools and archived code
+_archive
+samples
+tools
+paddleocr_models
+tmp
+*.pdf
+*.exe
+*.db

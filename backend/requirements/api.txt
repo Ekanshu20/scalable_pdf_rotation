@@ -1,0 +1,16 @@
+# API image (docker/api.Dockerfile). No ML libraries: the API only queues work
+# and reads finished PDFs; OCR runs in the worker.
+fastapi==0.111.0
+uvicorn==0.30.1
+pydantic==2.7.1
+celery==5.4.0
+redis==5.0.4
+python-multipart
+websockets
+sqlalchemy
+slowapi
+PyMuPDF>=1.23.0
+passlib
+bcrypt==3.2.2
+python-jose[cryptography]
+pydantic-settings==2.3.4

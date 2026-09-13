@@ -1,3 +1,5 @@
+# Build context: repository root (see docker-compose.yml and CI).
+
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
 # Avoid prompts from apt
@@ -22,15 +24,15 @@ WORKDIR /app
 RUN python3 -m pip install --upgrade pip
 
 # Install Python dependencies
-COPY requirements_docker.txt .
-RUN python3 -m pip install -r requirements_docker.txt
+COPY backend/requirements/worker.txt requirements.txt
+RUN python3 -m pip install -r requirements.txt
 
-# Copy application files
-COPY . .
+# Only the backend package; the frontend and archive stay out of the image
+COPY backend/app app
 
 # Set environment variables for GPU usage
 ENV CUDA_VISIBLE_DEVICES=0
 ENV LD_LIBRARY_PATH=/usr/local/cuda-11.8/targets/x86_64-linux/lib/:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
 # Run Celery worker using the solo pool so it can spawn its own child processes for ML parallelization
-CMD ["celery", "-A", "worker", "worker", "--loglevel=info", "--pool=solo"]
+CMD ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--pool=solo"]

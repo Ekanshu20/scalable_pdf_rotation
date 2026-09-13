@@ -49,26 +49,67 @@ The easiest way to run this entire system is using **Docker**. Docker automatica
 ### Step-by-Step Instructions
 
 1. **Clone the repository** and open your terminal in the project folder.
-2. **Build and start the services** by running this single command:
+2. **Create your secrets file.** Copy the template and generate a signing key:
+   ```bash
+   cp .env.example .env
+   python -c "import secrets; print(secrets.token_urlsafe(64))"
+   ```
+   Paste the output as `SECRET_KEY` in `.env`. The API won't start without a strong key, and `.env` is gitignored. In production, set `SECRET_KEY` from your platform's secret manager instead.
+
+3. **Build and start the services** by running this single command:
    ```bash
    docker-compose up -d --build
    ```
    *(Note: The first time you run this, it will take several minutes to download the heavy Machine Learning base images. Subsequent runs will take just seconds).*
 
-3. **Wait for the system to boot**. The services will start in the background.
+4. **Wait for the system to boot**. The services will start in the background.
 
-4. **Open the Web UI**:
+5. **Open the Web UI**:
    Navigate to `http://localhost:8000` in your browser. You can now drag and drop PDFs, toggle GPU acceleration, and watch the AI rotate them in real-time!
 
 ---
 
 ## 🛠️ Project Structure
 
-* **`main.py`**: The fully-featured FastAPI application. Provides the UI, authentication (`/api/v1/auth/*`), folder management (`/api/v1/folders`), core endpoints (`/api/v1/upload`, `/api/v1/history`, `/api/v1/compare`, `/api/v1/override`), and WebSocket progress streaming (`/ws/progress`).
-* **`worker.py`**: The Celery worker configuration. Contains the background ML execution task and the cleanup task.
-* **`scalable_pdf_rotation.py`**: The core ML logic that analyzes bounding boxes and text orientation using PaddleOCR.
-* **`database.py`**: SQLAlchemy configuration for the SQLite job history tracking.
-* **`docker-compose.yml`**: The blueprint that tells Docker how to run the API, Redis, Worker, and Beat scheduler together with shared volumes.
-* **`Dockerfile.api` & `Dockerfile.worker`**: The instructions for building the Docker images.
-* **`static/`**: Contains the HTML, CSS, and JS for the frontend UI.
-* **`requirements_docker.txt`**: Python dependencies needed to run the core ML environment.
+```
+.
+├── backend/                     Python services (API + worker share this package)
+│   ├── app/
+│   │   ├── main.py              FastAPI app: auth, folders, upload, review, exports, WebSocket progress
+│   │   ├── worker.py            Celery app: PDF processing task + hourly cleanup
+│   │   ├── database.py          SQLAlchemy models and SQLite setup
+│   │   └── pipeline/
+│   │       └── rotation.py      OCR orientation detection, blank/skew detection, searchable PDF output
+│   ├── static/
+│   │   ├── login.html           Login page (served at /)
+│   │   ├── style.css            Styles for the login page
+│   │   └── dist/                React build output (generated, gitignored)
+│   └── requirements/
+│       ├── api.txt              API image dependencies (no ML libraries)
+│       └── worker.txt           Worker image dependencies (PaddleOCR, OpenCV, CUDA)
+├── frontend/                    React + TypeScript dashboard (Vite, Tailwind, TanStack Query)
+│   └── src/
+│       ├── routes/              One component per URL (upload, folders, history, review)
+│       ├── features/review/     Review screen building blocks
+│       ├── components/ui/       Shared UI primitives
+│       ├── hooks/               Job progress, keyboard shortcuts, animations
+│       └── lib/                 Typed API client, query hooks, types
+├── docker/
+│   ├── api.Dockerfile           Builds the frontend, then the Python API image
+│   └── worker.Dockerfile        CUDA + PaddleOCR worker image
+├── docker-compose.yml           api, worker, celery-beat, redis
+├── .github/workflows/           CI (lint, frontend build, image builds + smoke test) and CD (push to GHCR)
+├── samples/                     Local test PDFs (gitignored)
+├── tools/                       Local helper binaries, e.g. cloudflared (gitignored)
+└── _archive/                    Superseded code kept for reference; see _archive/README.md
+```
+
+### Frontend development
+
+```bash
+cd frontend
+npm ci
+npm run dev      # http://localhost:5173, proxies /api and /ws to the API on :8000
+npm run build    # writes backend/static/dist, which the API serves at /dashboard
+```
+

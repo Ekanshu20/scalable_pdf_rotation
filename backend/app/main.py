@@ -24,8 +24,13 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from worker import app as celery_app, process_pdf_rotation
-from database import init_db, SessionLocal, Job, JobStatus, User, Folder, FileRecord
+from app.config import get_settings
+from app.worker import app as celery_app, process_pdf_rotation
+from app.database import init_db, SessionLocal, Job, JobStatus, User, Folder, FileRecord
+
+# Validate configuration first: a missing or weak SECRET_KEY stops startup
+# before anything touches the database. See app/config.py.
+settings = get_settings()
 
 # Initialize database
 init_db()
@@ -37,25 +42,38 @@ app = FastAPI(title="Scalable PDF Rotation API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Ensure base temporary directories exist
-BASE_TMP_DIR = "/app/tmp"
+# Shared with the worker through the shared_tmp volume.
+BASE_TMP_DIR = os.getenv("TMP_DIR", "/app/tmp")
 os.makedirs(BASE_TMP_DIR, exist_ok=True)
 
-# Mount the static directory to serve the frontend at the root
-app.mount("/static", StaticFiles(directory="/app/static"), name="static")
+# backend/static: the login page plus the React build in static/dist.
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+SPA_INDEX = os.path.join(STATIC_DIR, "dist", "index.html")
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/")
 async def serve_frontend():
-    return FileResponse("/app/static/login.html")
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"))
 
 @app.get("/dashboard")
-async def serve_dashboard():
-    return FileResponse("/app/static/index.html")
+@app.get("/dashboard/{path:path}")
+async def serve_dashboard(path: str = ""):
+    # The React app routes client-side (/dashboard/review/<id>, /dashboard/folders/3),
+    # so every dashboard URL returns the same shell.
+    if not os.path.exists(SPA_INDEX):
+        return Response(
+            "Frontend bundle not found. Build it with: cd frontend && npm ci && npm run build",
+            status_code=503,
+            media_type="text/plain",
+        )
+    return FileResponse(SPA_INDEX, headers={"Cache-Control": "no-cache"})
 
 # --- AUTHENTICATION ---
-SECRET_KEY = "your-super-secret-key-change-in-production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
+# Loaded from the environment and validated at startup; see app/config.py.
+SECRET_KEY = settings.secret_key.get_secret_value()
+ALGORITHM = settings.jwt_algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -1062,6 +1080,11 @@ def _require_job_result(task_id: str, user: User, db: Session):
 
     task_result = AsyncResult(task_id, app=celery_app)
     if task_result.status != 'SUCCESS' or not task_result.result:
+        # Celery forgets results after 24h and then reports PENDING, which is
+        # indistinguishable from "still queued" - the DB row is what knows the
+        # job actually finished.
+        if job.status == "SUCCESS":
+            raise HTTPException(status_code=410, detail="Review data for this job has expired.")
         raise HTTPException(status_code=400, detail="Task not complete yet.")
     return job, task_result.result
 

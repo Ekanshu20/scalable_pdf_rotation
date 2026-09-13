@@ -1,3 +1,4 @@
+# Worker image (docker/worker.Dockerfile): API deps plus the OCR/ML stack.
 # API Dependencies
 fastapi==0.111.0
 uvicorn==0.30.1

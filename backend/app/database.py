@@ -67,6 +67,11 @@ engine = create_engine(DB_PATH, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
+    # SQLite won't create missing parent directories. Under docker-compose the
+    # shared_tmp volume provides /app/tmp, but a bare `docker run` (CI smoke
+    # test, a client running the image alone) would crash on startup.
+    if engine.url.get_backend_name() == "sqlite" and engine.url.database not in (None, "", ":memory:"):
+        os.makedirs(os.path.dirname(os.path.abspath(engine.url.database)), exist_ok=True)
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
 
