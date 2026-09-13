@@ -216,16 +216,3 @@ export function useGroupAction(taskId: string) {
     onError,
   });
 }
-
-export function useUpload() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ files, useGpu, folderId }: { files: File[]; useGpu: boolean; folderId: number | null }) =>
-      api.upload(files, { useGpu, folderId }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.history });
-      qc.invalidateQueries({ queryKey: keys.folders });
-    },
-    onError,
-  });
-}

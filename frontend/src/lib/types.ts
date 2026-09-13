@@ -102,6 +102,21 @@ export interface ReviewGroupsResponse {
   groups: ReviewGroup[];
 }
 
+export interface UploadSession {
+  upload_id: string;
+  chunk_size: number;
+  max_file_bytes: number;
+}
+
+export interface UploadFileState {
+  file_id: string;
+  filename: string;
+  size: number;
+  received: number;
+  complete: boolean;
+  pages: number | null;
+}
+
 export interface UploadResult {
   message: string;
   task_id: string;

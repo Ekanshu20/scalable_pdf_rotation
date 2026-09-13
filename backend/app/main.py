@@ -27,6 +27,7 @@ from sqlalchemy import or_
 from app.config import get_settings
 from app.worker import app as celery_app, process_pdf_rotation
 from app.database import init_db, SessionLocal, Job, JobStatus, User, Folder, FileRecord
+from app.uploads import CHUNK_SIZE, MAX_FILE_BYTES, UploadError, UploadStore
 
 # Validate configuration first: a missing or weak SECRET_KEY stops startup
 # before anything touches the database. See app/config.py.
@@ -616,6 +617,154 @@ async def start_rotation(
     )
     return {"message": "Job submitted successfully", "task_id": task.id}
 
+def _submit_job(db: Session, user: User, session_id: str, pdfs: List[tuple], use_gpu: bool,
+                folder_id: Optional[int], num_workers: int = 6) -> dict:
+    """
+    Records the files and queues processing. `pdfs` is [(filename, page_count)] for
+    files already saved in {tmp}/{session_id}/input. Shared by both upload paths so
+    they create jobs identically.
+    """
+    input_folder = os.path.join(BASE_TMP_DIR, session_id, "input")
+    output_folder = os.path.join(BASE_TMP_DIR, session_id, "output")
+
+    for filename, _pages in pdfs:
+        # Always record the file (folder_id may be None for unfiled uploads) so its
+        # completion status is tracked in the DB, not just the live WebSocket session.
+        db.add(FileRecord(
+            folder_id=folder_id,
+            user_id=user.id,
+            filename=filename,
+            file_path=os.path.join(output_folder, os.path.basename(filename)),
+        ))
+    db.commit()
+
+    task = process_pdf_rotation.delay(input_folder, output_folder, use_gpu, gpu_mem=1500, num_workers=num_workers)
+
+    total_pages = sum(pages for _name, pages in pdfs)
+    db.add(Job(
+        task_id=task.id,
+        session_id=session_id,
+        user_id=user.id,
+        folder_id=folder_id,
+        total_files=len(pdfs),
+        total_pages=total_pages,
+        status=JobStatus.PROCESSING.value,
+    ))
+    db.commit()
+
+    return {
+        "message": "Files uploaded and job submitted",
+        "task_id": task.id,
+        "session_id": session_id,
+        "total_files": len(pdfs),
+        "total_pages": total_pages,
+    }
+
+
+def _require_folder(db: Session, user: User, folder_id: Optional[int]) -> None:
+    if folder_id:
+        folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user.id).first()
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+
+# ----- Chunked, resumable uploads (protocol documented in app/uploads.py) -----
+
+upload_store = UploadStore(BASE_TMP_DIR)
+
+
+def _upload_http_error(err: UploadError) -> HTTPException:
+    detail = {"message": err.detail, **err.extra} if err.extra else err.detail
+    return HTTPException(status_code=err.status, detail=detail)
+
+
+class UploadFileRegistration(BaseModel):
+    filename: str
+    size: int
+
+
+class UploadCommit(BaseModel):
+    use_gpu: bool = True
+    folder_id: Optional[int] = None
+    num_workers: int = 6
+
+
+@app.post("/api/v1/uploads", status_code=201)
+@limiter.limit("30/minute")
+async def create_upload(request: Request, current_user: User = Depends(get_current_user)):
+    upload_id = upload_store.create(current_user.id)
+    return {"upload_id": upload_id, "chunk_size": CHUNK_SIZE, "max_file_bytes": MAX_FILE_BYTES}
+
+
+@app.post("/api/v1/uploads/{upload_id}/files", status_code=201)
+@limiter.limit("2000/minute")
+async def register_upload_file(request: Request, upload_id: str, body: UploadFileRegistration,
+                               current_user: User = Depends(get_current_user)):
+    try:
+        return upload_store.register_file(upload_id, current_user.id, body.filename, body.size).public()
+    except UploadError as err:
+        raise _upload_http_error(err)
+
+
+@app.get("/api/v1/uploads/{upload_id}/files/{file_id}")
+async def get_upload_file(upload_id: str, file_id: str, current_user: User = Depends(get_current_user)):
+    try:
+        return upload_store.file_status(upload_id, current_user.id, file_id).public()
+    except UploadError as err:
+        raise _upload_http_error(err)
+
+
+@app.put("/api/v1/uploads/{upload_id}/files/{file_id}")
+@limiter.limit("3000/minute")
+async def upload_file_chunk(request: Request, upload_id: str, file_id: str, offset: int,
+                            current_user: User = Depends(get_current_user)):
+    length = request.headers.get("content-length")
+    try:
+        state = await upload_store.write_chunk(
+            upload_id, current_user.id, file_id, offset, request.stream(),
+            int(length) if length and length.isdigit() else None,
+        )
+        return state.public()
+    except UploadError as err:
+        raise _upload_http_error(err)
+
+
+@app.post("/api/v1/uploads/{upload_id}/commit")
+@limiter.limit("30/minute")
+async def commit_upload(request: Request, upload_id: str, body: UploadCommit,
+                        current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        previous = upload_store.committed_result(upload_id, current_user.id)
+        if previous is not None:
+            return previous  # retry after a lost response: same job, nothing queued twice
+        _require_folder(db, current_user, body.folder_id)
+        files = upload_store.begin_commit(upload_id, current_user.id)
+    except UploadError as err:
+        raise _upload_http_error(err)
+    try:
+        result = _submit_job(db, current_user, upload_id, [(f.filename, f.pages or 0) for f in files],
+                             body.use_gpu, body.folder_id, body.num_workers)
+        upload_store.record_commit(upload_id, result)
+        return result
+    except Exception:
+        # Queueing failed (e.g. Redis down): release the claim so the user can retry
+        # without uploading again.
+        db.rollback()
+        upload_store.abort_commit(upload_id)
+        raise
+
+
+@app.delete("/api/v1/uploads/{upload_id}", status_code=204)
+async def discard_upload(upload_id: str, current_user: User = Depends(get_current_user)):
+    try:
+        upload_store.discard(upload_id, current_user.id)
+    except UploadError as err:
+        raise _upload_http_error(err)
+    return Response(status_code=204)
+
+
+# Single-request multipart upload. Kept for API clients and scripts; the web UI
+# uses the chunked endpoints above, which survive slow links and proxy limits.
 @app.post("/api/v1/upload")
 @limiter.limit("10/minute")
 async def handle_upload(
@@ -629,81 +778,30 @@ async def handle_upload(
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-        
-    if folder_id:
-        folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
-        if not folder:
-            raise HTTPException(status_code=404, detail="Folder not found")
+    _require_folder(db, current_user, folder_id)
 
     session_id = str(uuid.uuid4())
     input_folder = os.path.join(BASE_TMP_DIR, session_id, "input")
-    output_folder = os.path.join(BASE_TMP_DIR, session_id, "output")
-    
     os.makedirs(input_folder, exist_ok=True)
-    os.makedirs(output_folder, exist_ok=True)
-    
-    # Save files
-    valid_pdf_count = 0
-    total_pages_count = 0
+    os.makedirs(os.path.join(BASE_TMP_DIR, session_id, "output"), exist_ok=True)
+
+    pdfs = []
     for file in files:
-        if file.filename.lower().endswith(".pdf"):
-            file_path = os.path.join(input_folder, os.path.basename(file.filename))
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            
-            try:
-                doc = fitz.open(file_path)
-                total_pages_count += doc.page_count
-                doc.close()
-                valid_pdf_count += 1
+        if not file.filename.lower().endswith(".pdf"):
+            continue
+        file_path = os.path.join(input_folder, os.path.basename(file.filename))
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        try:
+            with fitz.open(file_path) as doc:
+                pdfs.append((file.filename, doc.page_count))
+        except Exception:
+            pass
 
-                # Always record the file (folder_id may be None for unfiled uploads)
-                # so its completion status is tracked in the DB, not just in the
-                # live WebSocket session.
-                new_file = FileRecord(
-                    folder_id=folder_id,
-                    user_id=current_user.id,
-                    filename=file.filename,
-                    file_path=os.path.join(output_folder, os.path.basename(file.filename))
-                )
-                db.add(new_file)
-            except Exception:
-                pass
-                
-    if valid_pdf_count == 0:
-         raise HTTPException(status_code=400, detail="No valid PDF files found.")
-         
-    db.commit()
+    if not pdfs:
+        raise HTTPException(status_code=400, detail="No valid PDF files found.")
 
-    # Dispatch to Celery
-    task = process_pdf_rotation.delay(
-        input_folder,
-        output_folder,
-        use_gpu,
-        gpu_mem=1500,
-        num_workers=num_workers
-    )
-    
-    # Record job in database
-    new_job = Job(
-        task_id=task.id,
-        session_id=session_id,
-        user_id=current_user.id,
-        folder_id=folder_id,
-        total_files=valid_pdf_count,
-        total_pages=total_pages_count,
-        status=JobStatus.PROCESSING.value
-    )
-    db.add(new_job)
-    db.commit()
-    
-    return {
-        "message": "Files uploaded and job submitted",
-        "task_id": task.id,
-        "session_id": session_id,
-        "total_files": valid_pdf_count,
-        "total_pages": total_pages_count
-    }
+    return _submit_job(db, current_user, session_id, pdfs, use_gpu, folder_id, num_workers)
 
 @app.get("/api/v1/history")
 async def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

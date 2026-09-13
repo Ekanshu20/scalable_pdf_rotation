@@ -1,10 +1,15 @@
 import type {
   Folder, FileRecord, Job, ReviewManifest, ReviewGroupsResponse,
-  UploadResult, User, JobStatus,
+  UploadResult, UploadSession, UploadFileState, User, JobStatus,
 } from './types';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(
+    message: string,
+    public status: number,
+    /** Structured `detail` from the server, when it sent an object (e.g. a resume offset). */
+    public detail?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = 'ApiError';
   }
@@ -49,14 +54,19 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    let detail = `Request failed (${res.status})`;
+    let message = `Request failed (${res.status})`;
+    let detail: Record<string, unknown> | undefined;
     try {
-      const data = (await res.json()) as { detail?: string };
-      if (data?.detail) detail = data.detail;
+      const data = (await res.json()) as { detail?: string | Record<string, unknown> };
+      if (typeof data?.detail === 'string') message = data.detail;
+      else if (data?.detail && typeof data.detail === 'object') {
+        detail = data.detail;
+        if (typeof detail.message === 'string') message = detail.message;
+      }
     } catch {
       /* error body was not JSON */
     }
-    throw new ApiError(detail, res.status);
+    throw new ApiError(message, res.status, detail);
   }
 
   if (res.status === 204) return undefined as T;
@@ -97,13 +107,15 @@ export const api = {
   status: (taskId: string) =>
     request<{ task_id: string; status: JobStatus; details?: unknown; error?: string }>(`/api/v1/status/${taskId}`),
 
-  upload: (files: File[], opts: { useGpu?: boolean; folderId?: number | null } = {}) => {
-    const form = new FormData();
-    files.forEach((f) => form.append('files', f));
-    form.append('use_gpu', String(opts.useGpu ?? true));
-    if (opts.folderId) form.append('folder_id', String(opts.folderId));
-    return request<UploadResult>('/api/v1/upload', { method: 'POST', form });
-  },
+  // Chunked uploads: see lib/upload-manager.ts for how these are sequenced.
+  createUpload: () => request<UploadSession>('/api/v1/uploads', { method: 'POST' }),
+  registerUploadFile: (uploadId: string, filename: string, size: number) =>
+    request<UploadFileState>(`/api/v1/uploads/${uploadId}/files`, { method: 'POST', body: { filename, size } }),
+  uploadFileStatus: (uploadId: string, fileId: string) =>
+    request<UploadFileState>(`/api/v1/uploads/${uploadId}/files/${fileId}`),
+  commitUpload: (uploadId: string, body: { use_gpu: boolean; folder_id: number | null }) =>
+    request<UploadResult>(`/api/v1/uploads/${uploadId}/commit`, { method: 'POST', body }),
+  discardUpload: (uploadId: string) => request<void>(`/api/v1/uploads/${uploadId}`, { method: 'DELETE' }),
 
   review: (taskId: string, params: ReviewParams = {}) => {
     const search = new URLSearchParams();

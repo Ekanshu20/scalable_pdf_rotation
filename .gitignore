@@ -23,7 +23,7 @@ eggs/
 /lib64/
 parts/
 sdist/
-var/
+var/z
 wheels/
 share/python-wheels/
 *.egg-info/
@@ -58,3 +58,4 @@ tools/*
 # CI and docker/api.Dockerfile install and build them.
 frontend/node_modules/
 *.tsbuildinfo
+_archive/

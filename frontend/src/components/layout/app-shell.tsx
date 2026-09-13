@@ -1,7 +1,9 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { FolderOpen, History, LogOut, Monitor, Moon, Sun, UploadCloud } from 'lucide-react';
+import { useEffect } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { AlertTriangle, FolderOpen, History, Loader2, LogOut, Monitor, Moon, Sun, UploadCloud } from 'lucide-react';
 import { logout } from '@/lib/api';
 import { useMe } from '@/lib/queries';
+import { useUploadManager } from '@/lib/upload-manager';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
@@ -21,6 +23,47 @@ const THEMES = [
   { value: 'dark', label: 'Dark', icon: Moon },
   { value: 'system', label: 'System', icon: Monitor },
 ] as const;
+
+/** Visible from every page, so leaving the Upload page never hides a running upload. */
+function UploadIndicator() {
+  const s = useUploadManager();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+
+  const active = s.phase === 'uploading' || s.phase === 'committing';
+  useEffect(() => {
+    if (!active) return undefined;
+    // Closing or refreshing the tab kills in-flight chunks; make the browser ask first.
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [active]);
+
+  if (pathname === '/' || !['uploading', 'committing', 'attention', 'processing'].includes(s.phase)) return null;
+  const pct = s.totalBytes ? Math.floor((s.sentBytes / s.totalBytes) * 100) : 0;
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/')}
+      className={cn(
+        'hidden items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium sm:flex',
+        s.phase === 'attention'
+          ? 'border-destructive/40 bg-destructive/10 text-destructive'
+          : 'border-primary/30 bg-accent text-accent-foreground',
+      )}
+    >
+      {s.phase === 'attention' ? <AlertTriangle className="size-3.5" /> : <Loader2 className="size-3.5 animate-spin" />}
+      {s.phase === 'uploading' && `Uploading ${pct}%`}
+      {s.phase === 'committing' && 'Starting processing'}
+      {s.phase === 'attention' && 'Upload needs attention'}
+      {s.phase === 'processing' && 'Processing'}
+    </button>
+  );
+}
 
 export function AppShell() {
   const { data: me } = useMe();
@@ -65,6 +108,7 @@ export function AppShell() {
           </nav>
 
           <div className="flex shrink-0 items-center gap-1">
+            <UploadIndicator />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon-sm" aria-label="Theme">
