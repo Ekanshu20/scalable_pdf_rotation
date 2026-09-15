@@ -108,7 +108,8 @@ export const api = {
     request<{ task_id: string; status: JobStatus; details?: unknown; error?: string }>(`/api/v1/status/${taskId}`),
 
   // Chunked uploads: see lib/upload-manager.ts for how these are sequenced.
-  createUpload: () => request<UploadSession>('/api/v1/uploads', { method: 'POST' }),
+  createUpload: (body: { use_gpu: boolean; folder_id: number | null }) =>
+    request<UploadSession>('/api/v1/uploads', { method: 'POST', body }),
   registerUploadFile: (uploadId: string, filename: string, size: number) =>
     request<UploadFileState>(`/api/v1/uploads/${uploadId}/files`, { method: 'POST', body: { filename, size } }),
   uploadFileStatus: (uploadId: string, fileId: string) =>

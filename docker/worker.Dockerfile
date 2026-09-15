@@ -34,5 +34,9 @@ COPY backend/app app
 ENV CUDA_VISIBLE_DEVICES=0
 ENV LD_LIBRARY_PATH=/usr/local/cuda-11.8/targets/x86_64-linux/lib/:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
-# Run Celery worker using the solo pool so it can spawn its own child processes for ML parallelization
-CMD ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--pool=solo"]
+# Prefork pool: each child process loads PaddleOCR once and keeps it (see app/worker.py).
+# Concurrency is derived from GPU memory at startup unless OCR_CONCURRENCY is set.
+#   -Q ocr,celery          page slices + legacy/maintenance tasks
+#   -O fair                hand a task only to an idle child, so jobs interleave
+#   --max-tasks-per-child  recycle a child now and then to cap native memory growth
+CMD ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--pool=prefork", "-Q", "ocr,celery", "-O", "fair", "--max-tasks-per-child=500"]

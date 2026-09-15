@@ -24,6 +24,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
+from app import jobs
 from app.config import get_settings
 from app.worker import app as celery_app, process_pdf_rotation
 from app.database import init_db, SessionLocal, Job, JobStatus, User, Folder, FileRecord
@@ -194,9 +195,9 @@ def get_folder_files(folder_id: int, current_user: User = Depends(get_current_us
         })
     
     # Also get jobs linked to this folder
-    jobs = db.query(Job).filter(Job.folder_id == folder_id, Job.user_id == current_user.id).order_by(Job.created_at.desc()).all()
+    folder_jobs = db.query(Job).filter(Job.folder_id == folder_id, Job.user_id == current_user.id).order_by(Job.created_at.desc()).all()
     job_list = []
-    for j in jobs:
+    for j in folder_jobs:
         job_list.append({
             "task_id": j.task_id,
             "status": j.status,
@@ -225,11 +226,11 @@ def get_unfiled_files(current_user: User = Depends(get_current_user), db: Sessio
             "created_at": f.created_at.isoformat()
         })
 
-    jobs = db.query(Job).filter(
+    folder_jobs = db.query(Job).filter(
         Job.folder_id.is_(None), Job.user_id == current_user.id
     ).order_by(Job.created_at.desc()).all()
     job_list = []
-    for j in jobs:
+    for j in folder_jobs:
         job_list.append({
             "task_id": j.task_id,
             "status": j.status,
@@ -380,26 +381,28 @@ def move_job_to_folder(task_id: str, request: MoveJobRequest, current_user: User
     job = db.query(Job).filter(Job.task_id == task_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    target = None
     if request.folder_id:
         folder = db.query(Folder).filter(Folder.id == request.folder_id, Folder.user_id == current_user.id).first()
         if not folder:
             raise HTTPException(status_code=404, detail="Target folder not found")
-        job.folder_id = folder.id
-        task_result = AsyncResult(task_id, app=celery_app)
-        if task_result.status == 'SUCCESS' and task_result.result:
-            output_folder = task_result.result.get("output_folder")
-            if output_folder and os.path.exists(output_folder):
-                db.query(FileRecord).filter(FileRecord.file_path.startswith(output_folder)).delete()
-                for filename in os.listdir(output_folder):
-                    new_file = FileRecord(folder_id=folder.id, user_id=current_user.id, filename=filename, file_path=os.path.join(output_folder, filename))
-                    db.add(new_file)
+        target = folder.id
+    job.folder_id = target
+
+    if job.session_id:
+        # Files were recorded per job when uploaded: re-point them rather than rebuild.
+        output_folder = os.path.join(BASE_TMP_DIR, job.session_id, "output")
+        db.query(FileRecord).filter(FileRecord.file_path.startswith(output_folder)).update(
+            {FileRecord.folder_id: target}, synchronize_session=False)
     else:
-        job.folder_id = None
-        task_result = AsyncResult(task_id, app=celery_app)
-        if task_result.status == 'SUCCESS' and task_result.result:
-            output_folder = task_result.result.get("output_folder")
-            if output_folder:
-                db.query(FileRecord).filter(FileRecord.file_path.startswith(output_folder)).delete()
+        result = _job_result(job)
+        output_folder = result.get("output_folder") if result else None
+        if output_folder:
+            db.query(FileRecord).filter(FileRecord.file_path.startswith(output_folder)).delete()
+            if target and os.path.exists(output_folder):
+                for filename in os.listdir(output_folder):
+                    db.add(FileRecord(folder_id=target, user_id=current_user.id, filename=filename,
+                                      file_path=os.path.join(output_folder, filename)))
     db.commit()
     return {"message": "Moved successfully"}
 
@@ -458,9 +461,9 @@ def download_bulk(task_ids: str = "", folder_ids: str = "", token: str = None, d
     for task_id in tasks:
         job = db.query(Job).filter(Job.task_id == task_id, Job.user_id == user.id).first()
         if job and job.status == 'SUCCESS':
-            task_result = AsyncResult(task_id, app=celery_app)
-            if task_result.status == 'SUCCESS' and task_result.result:
-                output_folder = task_result.result.get("output_folder")
+            job_result = _job_result(job)
+            if job_result:
+                output_folder = job_result.get("output_folder")
                 if output_folder and os.path.exists(output_folder):
                     for filename in os.listdir(output_folder):
                         path = os.path.join(output_folder, filename)
@@ -541,9 +544,9 @@ def get_dashboard(current_user: User = Depends(get_current_user), db: Session = 
     for job in recent_jobs_db:
         if job.status == JobStatus.SUCCESS.value:
             try:
-                task_result = AsyncResult(job.task_id, app=celery_app)
-                if task_result.status == 'SUCCESS' and task_result.result:
-                    page_rotations = task_result.result.get('page_rotations', {})
+                job_result = _job_result(job)
+                if job_result:
+                    page_rotations = job_result.get('page_rotations', {})
                     for filename, rotations in page_rotations.items():
                         for page_num, rot in rotations.items():
                             if rot == 0:
@@ -560,9 +563,9 @@ def get_dashboard(current_user: User = Depends(get_current_user), db: Session = 
         filenames = []
         if j.status == JobStatus.SUCCESS.value:
             try:
-                task_result = AsyncResult(j.task_id, app=celery_app)
-                if task_result.status == 'SUCCESS' and task_result.result:
-                    page_rotations = task_result.result.get('page_rotations', {})
+                job_result = _job_result(j)
+                if job_result:
+                    page_rotations = job_result.get('page_rotations', {})
                     filenames = list(page_rotations.keys())
             except Exception:
                 pass
@@ -617,55 +620,124 @@ async def start_rotation(
     )
     return {"message": "Job submitted successfully", "task_id": task.id}
 
-def _submit_job(db: Session, user: User, session_id: str, pdfs: List[tuple], use_gpu: bool,
-                folder_id: Optional[int], num_workers: int = 6) -> dict:
-    """
-    Records the files and queues processing. `pdfs` is [(filename, page_count)] for
-    files already saved in {tmp}/{session_id}/input. Shared by both upload paths so
-    they create jobs identically.
-    """
-    input_folder = os.path.join(BASE_TMP_DIR, session_id, "input")
-    output_folder = os.path.join(BASE_TMP_DIR, session_id, "output")
-
-    for filename, _pages in pdfs:
-        # Always record the file (folder_id may be None for unfiled uploads) so its
-        # completion status is tracked in the DB, not just the live WebSocket session.
-        db.add(FileRecord(
-            folder_id=folder_id,
-            user_id=user.id,
-            filename=filename,
-            file_path=os.path.join(output_folder, os.path.basename(filename)),
-        ))
-    db.commit()
-
-    task = process_pdf_rotation.delay(input_folder, output_folder, use_gpu, gpu_mem=1500, num_workers=num_workers)
-
-    total_pages = sum(pages for _name, pages in pdfs)
-    db.add(Job(
-        task_id=task.id,
-        session_id=session_id,
-        user_id=user.id,
-        folder_id=folder_id,
-        total_files=len(pdfs),
-        total_pages=total_pages,
-        status=JobStatus.PROCESSING.value,
-    ))
-    db.commit()
-
-    return {
-        "message": "Files uploaded and job submitted",
-        "task_id": task.id,
-        "session_id": session_id,
-        "total_files": len(pdfs),
-        "total_pages": total_pages,
-    }
-
-
 def _require_folder(db: Session, user: User, folder_id: Optional[int]) -> None:
     if folder_id:
         folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user.id).first()
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
+
+
+# ----- Jobs: incremental processing (see app/jobs.py) -----
+#
+# A job is created when an upload starts. Each file is scheduled for OCR the moment
+# its upload completes, so small files finish while a big one is still uploading.
+# Sealing the job (on commit) means no more files are coming; it completes when the
+# files it has are done. The public job id is the upload/session id.
+
+def _create_job(db: Session, user: User, session_id: str, use_gpu: bool, folder_id: Optional[int]) -> Job:
+    job = Job(
+        task_id=session_id,
+        session_id=session_id,
+        user_id=user.id,
+        folder_id=folder_id,
+        total_files=0,
+        total_pages=0,
+        status=JobStatus.PROCESSING.value,
+    )
+    db.add(job)
+    db.commit()
+    jobs.create_job(session_id, user.id, session_id, use_gpu)
+    return job
+
+
+def _add_job_file(db: Session, job: Job, filename: str, pages: int) -> None:
+    """Schedules one uploaded file. Idempotent, so retried chunk responses are harmless."""
+    if not jobs.add_file(job.task_id, filename, pages, celery_app):
+        return
+    db.add(FileRecord(
+        folder_id=job.folder_id,
+        user_id=job.user_id,
+        filename=filename,
+        file_path=os.path.join(BASE_TMP_DIR, job.session_id, "output", os.path.basename(filename)),
+    ))
+    # Increment in SQL: parallel uploads finish files concurrently in separate sessions.
+    db.query(Job).filter(Job.id == job.id).update(
+        {Job.total_files: Job.total_files + 1, Job.total_pages: Job.total_pages + pages},
+        synchronize_session=False,
+    )
+    db.commit()
+    db.refresh(job)
+
+
+def _job_response(job: Job) -> dict:
+    return {
+        "message": "Files uploaded and job submitted",
+        "task_id": job.task_id,
+        "session_id": job.session_id,
+        "total_files": job.total_files,
+        "total_pages": job.total_pages,
+    }
+
+
+def _session_path(job: Job) -> Optional[str]:
+    return os.path.join(BASE_TMP_DIR, job.session_id) if job.session_id else None
+
+
+def _refresh_job(db: Session, job: Job) -> None:
+    """Brings job.status up to date from the pipeline: live Redis state, disk, or a legacy Celery task."""
+    if job.status != JobStatus.PROCESSING.value:
+        return
+    live = jobs.meta(job.task_id)
+    if live:
+        jobs.autoseal_if_stale(job.task_id)
+        jobs.check_complete(job.task_id)
+        state = jobs.meta(job.task_id).get("status")
+        if state in (JobStatus.SUCCESS.value, JobStatus.FAILED.value):
+            job.status = state
+            job.completed_at = datetime.utcnow()
+            if state == JobStatus.FAILED.value:
+                job.error_message = jobs.meta(job.task_id).get("error")
+            db.commit()
+        return
+
+    session = _session_path(job)
+    if session and jobs.has_disk_results(session):
+        # Live state is gone (Redis restarted or keys expired) but results were saved.
+        job.status = JobStatus.SUCCESS.value
+        job.completed_at = datetime.utcnow()
+        db.commit()
+        return
+
+    task_result = AsyncResult(job.task_id, app=celery_app)
+    if task_result.status == 'SUCCESS':
+        job.status = JobStatus.SUCCESS.value
+        job.completed_at = datetime.utcnow()
+    elif task_result.status == 'FAILED':
+        job.status = JobStatus.FAILED.value
+        job.error_message = str(task_result.result)
+        job.completed_at = datetime.utcnow()
+    db.commit()
+
+
+def _job_result(job: Job) -> Optional[dict]:
+    """Page results in one shape for every consumer: saved on disk, or a legacy Celery result."""
+    session = _session_path(job)
+    if session and jobs.has_disk_results(session):
+        return jobs.load_results(session)
+    task_result = AsyncResult(job.task_id, app=celery_app)
+    if task_result.status == 'SUCCESS' and task_result.result:
+        return task_result.result
+    return None
+
+
+def _finished_result(db: Session, job: Job) -> dict:
+    _refresh_job(db, job)
+    if job.status != JobStatus.SUCCESS.value:
+        raise HTTPException(status_code=400, detail="Task not complete yet.")
+    result = _job_result(job)
+    if not result:
+        raise HTTPException(status_code=410, detail="Review data for this job has expired.")
+    return result
 
 
 # ----- Chunked, resumable uploads (protocol documented in app/uploads.py) -----
@@ -676,6 +748,11 @@ upload_store = UploadStore(BASE_TMP_DIR)
 def _upload_http_error(err: UploadError) -> HTTPException:
     detail = {"message": err.detail, **err.extra} if err.extra else err.detail
     return HTTPException(status_code=err.status, detail=detail)
+
+
+class UploadCreate(BaseModel):
+    use_gpu: bool = True
+    folder_id: Optional[int] = None
 
 
 class UploadFileRegistration(BaseModel):
@@ -689,11 +766,19 @@ class UploadCommit(BaseModel):
     num_workers: int = 6
 
 
+def _upload_job(db: Session, user: User, upload_id: str) -> Optional[Job]:
+    return db.query(Job).filter(Job.task_id == upload_id, Job.user_id == user.id).first()
+
+
 @app.post("/api/v1/uploads", status_code=201)
 @limiter.limit("30/minute")
-async def create_upload(request: Request, current_user: User = Depends(get_current_user)):
+async def create_upload(request: Request, body: Optional[UploadCreate] = None,
+                        current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    body = body or UploadCreate()
+    _require_folder(db, current_user, body.folder_id)
     upload_id = upload_store.create(current_user.id)
-    return {"upload_id": upload_id, "chunk_size": CHUNK_SIZE, "max_file_bytes": MAX_FILE_BYTES}
+    _create_job(db, current_user, upload_id, body.use_gpu, body.folder_id)
+    return {"upload_id": upload_id, "task_id": upload_id, "chunk_size": CHUNK_SIZE, "max_file_bytes": MAX_FILE_BYTES}
 
 
 @app.post("/api/v1/uploads/{upload_id}/files", status_code=201)
@@ -717,16 +802,22 @@ async def get_upload_file(upload_id: str, file_id: str, current_user: User = Dep
 @app.put("/api/v1/uploads/{upload_id}/files/{file_id}")
 @limiter.limit("3000/minute")
 async def upload_file_chunk(request: Request, upload_id: str, file_id: str, offset: int,
-                            current_user: User = Depends(get_current_user)):
+                            current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     length = request.headers.get("content-length")
     try:
         state = await upload_store.write_chunk(
             upload_id, current_user.id, file_id, offset, request.stream(),
             int(length) if length and length.isdigit() else None,
         )
-        return state.public()
     except UploadError as err:
         raise _upload_http_error(err)
+
+    if state.complete and state.pages:
+        job = _upload_job(db, current_user, upload_id)
+        if job:
+            # Start processing this file now, without waiting for the rest of the batch.
+            _add_job_file(db, job, state.filename, state.pages)
+    return state.public()
 
 
 @app.post("/api/v1/uploads/{upload_id}/commit")
@@ -736,30 +827,55 @@ async def commit_upload(request: Request, upload_id: str, body: UploadCommit,
     try:
         previous = upload_store.committed_result(upload_id, current_user.id)
         if previous is not None:
-            return previous  # retry after a lost response: same job, nothing queued twice
-        _require_folder(db, current_user, body.folder_id)
+            return previous  # retry after a lost response: same job, nothing sealed twice
         files = upload_store.begin_commit(upload_id, current_user.id)
     except UploadError as err:
         raise _upload_http_error(err)
+
     try:
-        result = _submit_job(db, current_user, upload_id, [(f.filename, f.pages or 0) for f in files],
-                             body.use_gpu, body.folder_id, body.num_workers)
+        job = _upload_job(db, current_user, upload_id)
+        if job is None:
+            # Upload session created before incremental processing existed.
+            _require_folder(db, current_user, body.folder_id)
+            job = _create_job(db, current_user, upload_id, body.use_gpu, body.folder_id)
+        elif body.folder_id is not None and body.folder_id != job.folder_id:
+            _require_folder(db, current_user, body.folder_id)
+            job.folder_id = body.folder_id
+            db.query(FileRecord).filter(
+                FileRecord.file_path.startswith(os.path.join(BASE_TMP_DIR, upload_id, "output"))
+            ).update({FileRecord.folder_id: body.folder_id}, synchronize_session=False)
+            db.commit()
+
+        # Normally every file was scheduled when its last chunk landed; this catches any
+        # whose scheduling call failed. add_file is idempotent.
+        for f in files:
+            _add_job_file(db, job, f.filename, f.pages or 0)
+        jobs.seal(job.task_id)
+
+        result = _job_response(job)
         upload_store.record_commit(upload_id, result)
         return result
     except Exception:
-        # Queueing failed (e.g. Redis down): release the claim so the user can retry
-        # without uploading again.
         db.rollback()
         upload_store.abort_commit(upload_id)
         raise
 
 
 @app.delete("/api/v1/uploads/{upload_id}", status_code=204)
-async def discard_upload(upload_id: str, current_user: User = Depends(get_current_user)):
+async def discard_upload(upload_id: str, current_user: User = Depends(get_current_user),
+                         db: Session = Depends(get_db)):
     try:
         upload_store.discard(upload_id, current_user.id)
     except UploadError as err:
         raise _upload_http_error(err)
+    job = _upload_job(db, current_user, upload_id)
+    if job:
+        jobs.cancel(job.task_id)
+        db.query(FileRecord).filter(
+            FileRecord.file_path.startswith(os.path.join(BASE_TMP_DIR, upload_id, "output"))
+        ).delete(synchronize_session=False)
+        db.delete(job)
+        db.commit()
     return Response(status_code=204)
 
 
@@ -794,43 +910,37 @@ async def handle_upload(
             shutil.copyfileobj(file.file, buffer)
         try:
             with fitz.open(file_path) as doc:
-                pdfs.append((file.filename, doc.page_count))
+                pdfs.append((os.path.basename(file.filename), doc.page_count))
         except Exception:
             pass
 
     if not pdfs:
         raise HTTPException(status_code=400, detail="No valid PDF files found.")
 
-    return _submit_job(db, current_user, session_id, pdfs, use_gpu, folder_id, num_workers)
+    job = _create_job(db, current_user, session_id, use_gpu, folder_id)
+    for filename, pages in pdfs:
+        _add_job_file(db, job, filename, pages)
+    jobs.seal(job.task_id)
+    return _job_response(job)
 
 @app.get("/api/v1/history")
 async def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(20).all()
+    recent_jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(20).all()
     
-    # Sync PROCESSING jobs with Celery state
-    for job in jobs:
-        if job.status == JobStatus.PROCESSING.value:
-            task_result = AsyncResult(job.task_id, app=celery_app)
-            if task_result.status == 'SUCCESS':
-                job.status = JobStatus.SUCCESS.value
-                job.completed_at = datetime.utcnow()
-            elif task_result.status == 'FAILED':
-                job.status = JobStatus.FAILED.value
-                job.error_message = str(task_result.result)
-                job.completed_at = datetime.utcnow()
-    db.commit()
+    for job in recent_jobs:
+        _refresh_job(db, job)
     
     result = []
-    for j in jobs:
-        # Try to get rotation breakdown and filenames from Celery result
+    for j in recent_jobs:
+        # Rotation breakdown and filenames from the job's saved results
         pages_rotated = 0
         pages_unchanged = 0
         filenames = []
         if j.status == JobStatus.SUCCESS.value:
             try:
-                task_result = AsyncResult(j.task_id, app=celery_app)
-                if task_result.status == 'SUCCESS' and task_result.result:
-                    page_rotations = task_result.result.get('page_rotations', {})
+                job_result = _job_result(j)
+                if job_result:
+                    page_rotations = job_result.get('page_rotations', {})
                     filenames = list(page_rotations.keys())
                     for fname, rotations in page_rotations.items():
                         for pnum, rot in rotations.items():
@@ -900,29 +1010,22 @@ async def get_status(task_id: str, current_user: User = Depends(get_current_user
     job = db.query(Job).filter(Job.task_id == task_id, Job.user_id == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
+
+    _refresh_job(db, job)
+    snap = jobs.snapshot(task_id)
+    if snap is not None:
+        # Progress fields at the top level too, matching the WebSocket messages, so a
+        # client polling this endpoint gets the same updates as one on the socket.
+        return {**snap, "status": job.status, "error": job.error_message, "details": snap}
+
     task_result = AsyncResult(task_id, app=celery_app)
-    response = {"task_id": task_id, "status": task_result.status}
-    
-    if task_result.status == 'SUCCESS':
-        response["result"] = task_result.result
-        if job.status != JobStatus.SUCCESS.value:
-            job.status = JobStatus.SUCCESS.value
-            job.completed_at = datetime.utcnow()
-            db.commit()
-    elif task_result.status == 'FAILED':
-        response["error"] = str(task_result.result)
-        if job.status != JobStatus.FAILED.value:
-            job.status = JobStatus.FAILED.value
-            job.error_message = str(task_result.result)
-            job.completed_at = datetime.utcnow()
-            db.commit()
+    response = {"task_id": task_id, "status": job.status if job.status != JobStatus.PROCESSING.value else task_result.status}
+    if job.status == JobStatus.SUCCESS.value:
+        response["result"] = _job_result(job)
+    elif job.status == JobStatus.FAILED.value:
+        response["error"] = job.error_message
     elif task_result.status == 'PROCESSING':
         response["details"] = task_result.info
-        if job.status != JobStatus.PROCESSING.value:
-            job.status = JobStatus.PROCESSING.value
-            db.commit()
-        
     return response
 
 @app.get("/api/v1/preview/{task_id}")
@@ -931,11 +1034,9 @@ async def get_preview(task_id: str, current_user: User = Depends(get_current_use
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    task_result = AsyncResult(task_id, app=celery_app)
-    if task_result.status != 'SUCCESS':
-         raise HTTPException(status_code=400, detail="Task not complete yet.")
+    task_result_data = _finished_result(db, job)
          
-    output_folder = task_result.result.get("output_folder")
+    output_folder = task_result_data.get("output_folder")
     if not output_folder or not os.path.exists(output_folder):
          raise HTTPException(status_code=404, detail="Output folder not found.")
          
@@ -975,11 +1076,9 @@ async def download_results(task_id: str, token: str = None, db: Session = Depend
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    task_result = AsyncResult(task_id, app=celery_app)
-    if task_result.status != 'SUCCESS':
-         raise HTTPException(status_code=400, detail="Task not complete yet.")
+    task_result_data = _finished_result(db, job)
          
-    output_folder = task_result.result.get("output_folder")
+    output_folder = task_result_data.get("output_folder")
     if not output_folder or not os.path.exists(output_folder):
          raise HTTPException(status_code=404, detail="Output folder not found.")
          
@@ -1013,11 +1112,9 @@ async def get_compare_preview(task_id: str, current_user: User = Depends(get_cur
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    task_result = AsyncResult(task_id, app=celery_app)
-    if task_result.status != 'SUCCESS':
-         raise HTTPException(status_code=400, detail="Task not complete yet.")
+    task_result_data = _finished_result(db, job)
          
-    result_data = task_result.result
+    result_data = task_result_data
     output_folder = result_data.get("output_folder")
     input_folder = output_folder.replace("output", "input")
     page_rotations = result_data.get("page_rotations", {})
@@ -1091,11 +1188,9 @@ async def override_page(task_id: str, req: OverrideRequest, current_user: User =
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    task_result = AsyncResult(task_id, app=celery_app)
-    if task_result.status != 'SUCCESS':
-         raise HTTPException(status_code=400, detail="Task not complete yet.")
+    task_result_data = _finished_result(db, job)
          
-    output_folder = task_result.result.get("output_folder")
+    output_folder = task_result_data.get("output_folder")
     if not output_folder or not os.path.exists(output_folder):
          raise HTTPException(status_code=404, detail="Output folder not found.")
          
@@ -1176,15 +1271,7 @@ def _require_job_result(task_id: str, user: User, db: Session):
     """Fetch a finished job owned by this user, plus its Celery result payload."""
     job = _require_job(task_id, user, db)
 
-    task_result = AsyncResult(task_id, app=celery_app)
-    if task_result.status != 'SUCCESS' or not task_result.result:
-        # Celery forgets results after 24h and then reports PENDING, which is
-        # indistinguishable from "still queued" - the DB row is what knows the
-        # job actually finished.
-        if job.status == "SUCCESS":
-            raise HTTPException(status_code=410, detail="Review data for this job has expired.")
-        raise HTTPException(status_code=400, detail="Task not complete yet.")
-    return job, task_result.result
+    return job, _finished_result(db, job)
 
 def _job_folders(job: Job, result: dict):
     """Output folder comes from the task result; input is derived from the job's session."""
@@ -1991,6 +2078,16 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
     pubsub = redis.pubsub()
     channel_name = f"task_progress_{task_id}"
     await pubsub.subscribe(channel_name)
+
+    # Send the current state straight away: a client connecting mid-job (page switch,
+    # reconnect) would otherwise show nothing until the next page completes.
+    snap = jobs.snapshot(task_id)
+    if snap is not None:
+        await websocket.send_text(json.dumps(snap))
+        if snap["status"] in ("SUCCESS", "FAILED"):
+            await pubsub.unsubscribe(channel_name)
+            await redis.close()
+            return
     
     # Without these bounds the loop runs forever when a job never reports a terminal
     # state, which keeps the socket open, pins a Redis connection, and blocks uvicorn

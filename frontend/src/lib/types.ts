@@ -104,6 +104,8 @@ export interface ReviewGroupsResponse {
 
 export interface UploadSession {
   upload_id: string;
+  /** The processing job this upload feeds; files are processed as they arrive. */
+  task_id: string;
   chunk_size: number;
   max_file_bytes: number;
 }

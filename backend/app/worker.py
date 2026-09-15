@@ -1,112 +1,181 @@
 import os
 import sys
 
-# Put backend/ (the parent of the `app` package) on the path so Celery and the
-# spawned OCR child processes can import `app.*` regardless of working directory.
+# Put backend/ (the parent of the `app` package) on the path so Celery can import
+# `app.*` regardless of working directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from celery import Celery
-from celery.schedules import crontab
-import time
-import shutil
-import json
-import redis
+import json  # noqa: E402
+import logging  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
 
-# Configure Celery to use Redis as the message broker and backend
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+from celery.signals import celeryd_init, worker_process_init  # noqa: E402
 
-app = Celery("pdf_worker", broker=REDIS_URL, backend=REDIS_URL)
+from app import jobs  # noqa: E402
+from app.celery_app import REDIS_URL, app  # noqa: E402,F401  (REDIS_URL re-exported for callers)
 
-app.conf.beat_schedule = {
-    'cleanup-old-tmp-files-hourly': {
-        'task': 'cleanup_old_files',
-        'schedule': crontab(minute=0), # Every hour
-    },
-}
+logger = logging.getLogger(__name__)
 
-redis_client = redis.Redis.from_url(REDIS_URL)
+TMP_DIR = os.getenv("TMP_DIR", "/app/tmp")
+# VRAM each OCR process reserves. Concurrency is derived from it (see below).
+GPU_MEM_MB = int(os.getenv("OCR_GPU_MEM_MB", "1500"))
 
-@app.task(bind=True, name="process_pdf_rotation")
-def process_pdf_rotation(self, input_folder: str, output_folder: str, use_gpu: bool, gpu_mem: int, num_workers: int):
+# ---------------------------------------------------------------------------
+# Worker process model
+#
+# Each Celery pool process loads PaddleOCR once, when it starts, and keeps it for its
+# whole life. Tasks are small (a slice of a few pages), so jobs interleave fairly and
+# nothing pays a model load per job. This replaces the previous design, where every
+# job spawned its own multiprocessing.Pool, loaded the models again (~7 s), and had to
+# tear the pool down afterwards - the source of the CUDA teardown hangs.
+#
+# The parent process must never initialise CUDA: pool processes are forked from it.
+# Models are loaded in worker_process_init, which runs in each child after the fork.
+# ---------------------------------------------------------------------------
+
+
+@celeryd_init.connect
+def _set_concurrency(conf=None, **_kwargs):
+    """One OCR process per GPU memory slot, unless OCR_CONCURRENCY says otherwise."""
+    explicit = os.getenv("OCR_CONCURRENCY")
+    if explicit:
+        conf.worker_concurrency = max(1, int(explicit))
+        return
+    from app.pipeline.rotation import _cap_gpu_workers, _get_gpu_memory_mb
+
+    if _get_gpu_memory_mb():
+        conf.worker_concurrency = max(1, _cap_gpu_workers(8, GPU_MEM_MB))
+    else:
+        conf.worker_concurrency = 2
+    logger.info(f"OCR worker concurrency: {conf.worker_concurrency}")
+
+
+@worker_process_init.connect
+def _load_ocr_model(**_kwargs):
+    from app.pipeline import rotation
+
+    use_gpu = rotation._get_gpu_memory_mb() is not None
+    rotation.init_worker(use_gpu=use_gpu, gpu_mem=GPU_MEM_MB)
+
+
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+
+
+@app.task(name=jobs.PROCESS_PAGES_TASK, acks_late=True, reject_on_worker_lost=True)
+def process_pages(job_id: str, filename: str, start: int, end: int):
     """
-    Celery task that triggers the PDF rotation pipeline.
+    OCR one slice of one file. acks_late + reject_on_worker_lost: if the process dies
+    mid-slice the slice is redelivered, and pages already saved to disk are skipped.
     """
-    # Import inside the task so the lightweight API container doesn't try to load heavy ML libraries like cv2
-    from app.pipeline.rotation import run_rotation_pipeline
-
-    # Mark state as processing
-    self.update_state(state='PROCESSING', meta={'status': 'Starting rotation pipeline...', 'completed_files': 0, 'total_files': 0})
-    
-    def progress_callback(completed, total, filename, files_status, stats=None):
-        stats = stats or {}
-        # Update celery state
-        meta = {'status': f'Processing {filename}...', 'completed_files': completed, 'total_files': total}
-        meta.update(stats)
-        self.update_state(state='PROCESSING', meta=meta)
-        # Publish real-time to redis for websockets
-        message = json.dumps({
-            "task_id": self.request.id,
-            "status": "PROCESSING",
-            "completed_files": completed,
-            "total_files": total,
-            "filename": filename,
-            "files_status": files_status,
-            # Measured throughput - lets the UI show a real ETA instead of a guess
-            **stats
-        })
-        redis_client.publish(f"task_progress_{self.request.id}", message)
+    from app.pipeline import rotation
 
     try:
-        # Call the core pipeline
-        result = run_rotation_pipeline(
-            input_folder=input_folder,
-            output_folder=output_folder,
-            use_gpu=use_gpu,
-            gpu_mem=gpu_mem,
-            num_workers=num_workers,
-            progress_callback=progress_callback
+        jobs.process_slice(
+            job_id, filename, start, end, TMP_DIR,
+            analyze=rotation.analyze_page_rotation,
+            save_pdf=rotation._save_completed_pdf,
         )
-        
-        if result.get("status") == "failed":
-            self.update_state(state='FAILED', meta={'error': result.get("error")})
-            raise Exception(result.get("error"))
-            
-        result["output_folder"] = output_folder
-        
-        # Publish completion
-        message = json.dumps({
-            "task_id": self.request.id,
-            "status": "SUCCESS"
-        })
-        redis_client.publish(f"task_progress_{self.request.id}", message)
-        
-        return result
+    finally:
+        # Always release this job's slot and queue its next slice, even on failure,
+        # or the job would stall with work still pending.
+        jobs.slice_finished(job_id, app)
 
-    except Exception as e:
-        self.update_state(state='FAILED', meta={'error': str(e)})
-        
-        # Publish error
-        message = json.dumps({
-            "task_id": self.request.id,
-            "status": "FAILED",
-            "error": str(e)
-        })
-        redis_client.publish(f"task_progress_{self.request.id}", message)
-        
-        raise e
+
+@app.task(bind=True, name="process_pdf_rotation")
+def process_pdf_rotation(self, input_folder: str, output_folder: str, use_gpu: bool = True,
+                         gpu_mem: int = 1500, num_workers: int = 1):
+    """
+    Legacy whole-folder task, kept for POST /api/v1/rotate. Runs sequentially in this
+    already-initialised process instead of spawning a pool of model processes, which
+    would exhaust VRAM next to the persistent OCR workers. `use_gpu`, `gpu_mem` and
+    `num_workers` are accepted for compatibility; the worker's own setup decides them.
+    """
+    from app.pipeline import rotation
+
+    task_id = self.request.id
+    channel = f"task_progress_{task_id}"
+
+    def publish(message):
+        jobs.client().publish(channel, json.dumps({"task_id": task_id, **message}))
+
+    try:
+        pdf_files = []
+        for root, _dirs, files in os.walk(input_folder):
+            pdf_files.extend(os.path.join(root, f) for f in files if f.lower().endswith(".pdf"))
+        if not pdf_files:
+            raise ValueError(f"No PDFs found in {input_folder}")
+
+        import fitz
+
+        counts = {}
+        for path in pdf_files:
+            with fitz.open(path) as doc:
+                counts[path] = doc.page_count
+        total_pages = sum(counts.values())
+
+        started = time.time()
+        completed_pages = 0
+        files_status = {os.path.basename(p): "queued" for p in pdf_files}
+        page_rotations, page_details = {}, {}
+
+        for index, path in enumerate(pdf_files):
+            name = os.path.basename(path)
+            rotations, text, details = {}, {}, {}
+            for page in range(counts[path]):
+                _p, angle, method, detail, lines = rotation.analyze_page_rotation(path, page)
+                rotations[page] = (angle, method)
+                text[page] = lines
+                details[page] = {**detail, "angle": angle, "method": method}
+                completed_pages += 1
+                files_status[name] = f"processing ({page + 1}/{counts[path]})"
+                elapsed = time.time() - started
+                rate = completed_pages / elapsed if elapsed > 0 else 0
+                stats = {
+                    "completed_files": index, "total_files": len(pdf_files), "filename": name,
+                    "files_status": files_status, "completed_pages": completed_pages,
+                    "total_pages": total_pages, "elapsed_seconds": round(elapsed, 1),
+                    "pages_per_second": round(rate, 3),
+                    "eta_seconds": round((total_pages - completed_pages) / rate) if rate else None,
+                }
+                self.update_state(state="PROCESSING", meta=stats)
+                publish({"status": "PROCESSING", **stats})
+
+            out = os.path.join(output_folder, os.path.relpath(path, input_folder))
+            rotation._save_completed_pdf(path, out, rotations, text)
+            page_rotations[name] = {p: r[0] for p, r in rotations.items()}
+            page_details[name] = details
+            files_status[name] = "done"
+
+        publish({"status": "SUCCESS"})
+        return {
+            "status": "completed",
+            "files_processed": len(pdf_files),
+            "pages_processed": total_pages,
+            "time_seconds": time.time() - started,
+            "page_rotations": page_rotations,
+            "page_details": page_details,
+            "output_folder": output_folder,
+        }
+    except Exception as exc:
+        publish({"status": "FAILED", "error": str(exc)})
+        raise
+
 
 @app.task(name="cleanup_old_files")
 def cleanup_old_files():
     """
     Deletes folders in the shared tmp dir that are older than 24 hours.
     """
-    tmp_dir = os.getenv("TMP_DIR", "/app/tmp")
+    tmp_dir = TMP_DIR
     if not os.path.exists(tmp_dir):
         return
-        
+
     now = time.time()
-    cutoff = now - (24 * 60 * 60) # 24 hours
-    
+    cutoff = now - (24 * 60 * 60)  # 24 hours
+
     deleted_count = 0
     for folder in os.listdir(tmp_dir):
         # Ignore files, only look at session directories
@@ -119,7 +188,7 @@ def cleanup_old_files():
                     deleted_count += 1
                 except Exception as e:
                     print(f"Failed to delete {folder_path}: {e}")
-                    
+
     # Also delete old zip files
     for file in os.listdir(tmp_dir):
         if file.endswith('.zip'):
@@ -131,6 +200,6 @@ def cleanup_old_files():
                     deleted_count += 1
                 except Exception as e:
                     print(f"Failed to delete {file_path}: {e}")
-                    
+
     print(f"Cleanup finished. Deleted {deleted_count} items.")
     return f"Deleted {deleted_count} items."

@@ -102,13 +102,33 @@ function ActiveJob({
 
 // ===== Upload in progress =====
 
-function UploadRow({ item }: { item: UploadItem }) {
+/** Badge for a file that has finished uploading, from the job's live progress. */
+function ProcessingBadge({ status }: { status: string | undefined }) {
+  if (!status || status === 'queued') return <Badge variant="outline">Uploaded - waiting to process</Badge>;
+  if (status === 'done') return <Badge variant="success">Processed</Badge>;
+  if (status === 'failed') return <Badge variant="destructive">Processing failed</Badge>;
+  return (
+    <Badge variant="primary">
+      <Loader2 className="animate-spin" />
+      {status.replace('processing ', 'Processing ').replace(/[()]/g, '')}
+    </Badge>
+  );
+}
+
+function UploadRow({ item, processing }: { item: UploadItem; processing?: string }) {
   const pct = item.size ? (item.sent / item.size) * 100 : 0;
   const icon = {
     queued: <Clock className="size-4 shrink-0 text-muted-foreground" />,
     uploading: <Loader2 className="size-4 shrink-0 animate-spin text-primary" />,
     retrying: <RefreshCw className="size-4 shrink-0 animate-spin text-warning" />,
-    done: <CheckCircle2 className="size-4 shrink-0 text-success" />,
+    done:
+      processing === 'done' ? (
+        <CheckCircle2 className="size-4 shrink-0 text-success" />
+      ) : processing && processing.startsWith('processing') ? (
+        <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+      ) : (
+        <CheckCircle2 className="size-4 shrink-0 text-muted-foreground" />
+      ),
     failed: <AlertTriangle className="size-4 shrink-0 text-destructive" />,
     invalid: <FileWarning className="size-4 shrink-0 text-destructive" />,
   }[item.status];
@@ -131,7 +151,7 @@ function UploadRow({ item }: { item: UploadItem }) {
         {item.status === 'queued' && <Badge variant="outline">Queued</Badge>}
         {item.status === 'uploading' && <Badge variant="primary">{Math.floor(pct)}%</Badge>}
         {item.status === 'retrying' && <Badge variant="warning">Reconnecting ({item.attempt})</Badge>}
-        {item.status === 'done' && <Badge variant="success">Uploaded</Badge>}
+        {item.status === 'done' && <ProcessingBadge status={processing} />}
         {(item.status === 'failed' || item.status === 'invalid') && (
           <Badge variant="destructive">{item.status === 'invalid' ? 'Not a PDF' : 'Failed'}</Badge>
         )}
@@ -150,8 +170,11 @@ function UploadRow({ item }: { item: UploadItem }) {
   );
 }
 
-function UploadProgressCard() {
+function UploadProgressCard({ onDone }: { onDone: (id: string, failed: boolean, err?: string) => void }) {
   const s = useUploadManager();
+  // Files are processed as they arrive, so follow the job while the rest still uploads.
+  const job = useJobProgress(s.taskId, onDone);
+  const processedPct = job.totalPages ? (job.completedPages / job.totalPages) * 100 : 0;
   const { confirm, dialog } = useConfirm();
   const pct = s.totalBytes ? (s.sentBytes / s.totalBytes) * 100 : 0;
   const done = s.items.filter((i) => i.status === 'done').length;
@@ -190,6 +213,7 @@ function UploadProgressCard() {
             <p className="text-sm text-muted-foreground tabular">
               {formatBytes(s.sentBytes)} of {formatBytes(s.totalBytes)}
               {s.bytesPerSecond != null && s.phase === 'uploading' ? ` - ${formatBytes(Math.max(s.bytesPerSecond, 0))}/s` : ''}
+              {job.totalPages > 0 && ` - ${job.completedPages.toLocaleString()} of ${job.totalPages.toLocaleString()} pages processed`}
             </p>
           </div>
           {s.phase === 'uploading' && (
@@ -204,6 +228,9 @@ function UploadProgressCard() {
 
         <div className="space-y-2">
           <Progress value={pct} indicatorClassName={attention ? 'bg-destructive' : undefined} />
+          {job.totalPages > 0 && (
+            <Progress value={processedPct} className="h-1" indicatorClassName="bg-success" />
+          )}
           <div className="flex justify-between text-sm text-muted-foreground tabular">
             <span>
               {done} of {s.items.length} files uploaded
@@ -216,8 +243,8 @@ function UploadProgressCard() {
         {s.phase === 'uploading' && (
           <p className="flex items-start gap-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
             <Info className="mt-px size-3.5 shrink-0" />
-            Keep this tab open until the upload finishes. You can switch pages; the upload continues. If the connection
-            drops, it resumes automatically.
+            Keep this tab open until the upload finishes. Files start processing as soon as each one arrives. You can
+            switch pages; the upload continues, and resumes automatically if the connection drops.
           </p>
         )}
 
@@ -245,7 +272,7 @@ function UploadProgressCard() {
 
         <div className="max-h-96 space-y-1 overflow-y-auto">
           {items.map((item) => (
-            <UploadRow key={item.key} item={item} />
+            <UploadRow key={item.key} item={item} processing={job.files[item.name]} />
           ))}
         </div>
 
@@ -381,7 +408,7 @@ export function UploadPage() {
       {upload.phase === 'processing' && upload.taskId ? (
         <ActiveJob taskId={upload.taskId} onDone={onDone} />
       ) : uploading ? (
-        <UploadProgressCard />
+        <UploadProgressCard onDone={onDone} />
       ) : (
         <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
           <div className="space-y-5">

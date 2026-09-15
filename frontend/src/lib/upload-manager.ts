@@ -8,6 +8,9 @@ import type { UploadFileState, UploadResult } from './types';
  * Lives outside React as a singleton store, so an upload keeps running when the
  * user switches pages; components subscribe with useUploadManager().
  *
+ * Each file joins its processing job the moment its last chunk lands (server side),
+ * so small files are processed while larger ones are still uploading.
+ *
  * Reliability model:
  *  - each file goes up in chunks, each chunk its own request (no proxy body limits)
  *  - a failed chunk is retried with backoff; before retrying, the client asks the
@@ -266,9 +269,12 @@ class UploadManager {
     }, true);
 
     try {
-      const session = await api.createUpload();
+      const session = await api.createUpload({ use_gpu: options.useGpu, folder_id: options.folderId });
       this.uploadId = session.upload_id;
       this.chunkSize = session.chunk_size;
+      // The server processes each file as soon as it's uploaded, so the job's progress
+      // is available from the start, not only after the whole batch has arrived.
+      this.set({ taskId: session.task_id }, true);
     } catch (e) {
       this.set({ phase: 'idle', items: [], error: e instanceof Error ? e.message : 'Could not start the upload' }, true);
       return;

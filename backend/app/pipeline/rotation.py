@@ -138,6 +138,7 @@ def analyze_page_rotation(pdf_path, page_num):
     per-rotation scores and whether a human should look at this page.
     """
 
+    doc = None
     try:
         doc = fitz.open(pdf_path)
         page = doc.load_page(page_num)
@@ -272,6 +273,11 @@ def analyze_page_rotation(pdf_path, page_num):
     except Exception as e:
         logger.error(f"Error processing page {page_num}: {e}")
         return page_num, 0, "error", {"scores": {}, "needs_review": True, "reason": "error"}, []
+    finally:
+        # OCR worker processes are long-lived: an unclosed document here leaks a file
+        # handle and its buffers on every page.
+        if doc is not None:
+            doc.close()
 
 def _analyze_page_wrapper(args):
     """Wrapper to allow unpacking tuple arguments for multiprocessing.Pool and return pdf_path"""
@@ -371,29 +377,47 @@ def _shutdown_pool(pool, timeout=POOL_SHUTDOWN_TIMEOUT):
     task never reports a result and the worker stops consuming its queue - the job looks
     stuck even though its output was already written.
 
+    The deadline must cover terminate() itself, not just join(): CPython's
+    Pool._terminate_pool SIGTERMs the children and then calls p.join() on each with
+    no timeout, so a child that ignores SIGTERM blocks terminate() indefinitely. An
+    earlier version called terminate() on the calling thread and only bounded the
+    join afterwards, so the deadline never started and the task hung anyway.
+
     Every page result has been collected and every PDF saved by the time we get here, so
     there is nothing left to lose: give the children a bounded chance to exit, then kill
     them. CUDA state dies with the process.
     """
-    pool.terminate()
+    # Capture PIDs first: terminate() clears the pool's bookkeeping as it goes.
+    children = [p for p in getattr(pool, "_pool", []) if p is not None]
 
-    joiner = threading.Thread(target=pool.join, daemon=True)
-    joiner.start()
-    joiner.join(timeout)
+    def _terminate_and_join():
+        pool.terminate()
+        pool.join()
 
-    if not joiner.is_alive():
+    closer = threading.Thread(target=_terminate_and_join, name="pool-shutdown", daemon=True)
+    closer.start()
+    closer.join(timeout)
+
+    if not closer.is_alive():
         return
 
     logger.warning(
         f"Worker pool did not exit within {timeout}s (PaddlePaddle CUDA teardown). "
-        f"Killing child processes so the job can report its result."
+        f"Killing {sum(1 for c in children if c.is_alive())} child process(es) so the job can report its result."
     )
-    for child in getattr(pool, "_pool", []):
+    for child in children:
         try:
             if child.is_alive():
                 os.kill(child.pid, signal.SIGKILL)
         except Exception:
             pass
+
+    # With the children dead, terminate()'s internal joins return. Wait briefly so the
+    # pool's handler threads finish, but never block the task on it.
+    closer.join(5)
+    if closer.is_alive():
+        logger.warning("Pool shutdown thread still running after SIGKILL; continuing without it.")
+
 
 def _get_gpu_memory_mb():
     """Total VRAM (MB) of GPU 0, via nvidia-smi. Returns None if it can't be determined."""
